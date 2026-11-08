@@ -1,0 +1,12 @@
+data/raw/
+lake/*
+results/*.csv
+results/*.png
+__pycache__/
+*.pyc
+models/*.joblib
+.venv/
+!lake/.gitkeep
+!results/.gitkeep
+.streamlit/
+*.log

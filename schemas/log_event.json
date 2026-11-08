@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LogEvent",
+  "description": "Mediated schema chung cho moi nguon log sau khi parse (dau ra Spark job 1, topic parsed-logs).",
+  "type": "object",
+  "required": ["event_time", "ingest_time", "source", "content", "raw", "template_id", "template", "status"],
+  "properties": {
+    "event_time":    {"type": "string", "format": "date-time", "description": "Thoi diem trong log goc, ISO 8601 UTC"},
+    "ingest_time":   {"type": "string", "format": "date-time", "description": "Thoi diem replayer day vao Kafka"},
+    "source":        {"type": "string", "enum": ["BGL", "HDFS", "OpenStack"]},
+    "host":          {"type": ["string", "null"], "description": "BGL: node; HDFS: block_id hoac pid; OpenStack: instance_id"},
+    "level":         {"type": ["string", "null"], "description": "INFO | WARN | ERROR | FATAL | ..."},
+    "component":     {"type": ["string", "null"], "description": "BGL: KERNEL/APP...; HDFS: dfs.DataNode...; OpenStack: nova.compute..."},
+    "content":       {"type": "string", "description": "Phan noi dung sau header, dau vao cua Drain3"},
+    "raw":           {"type": "string", "description": "Dong log nguyen ban"},
+    "label":         {"type": ["string", "null"], "description": "Nhan ground truth neu co (BGL: '-' la normal)"},
+    "template_id":   {"type": "string"},
+    "template":      {"type": "string", "description": "Pattern voi <*> thay cho tham so"},
+    "status":        {"type": "string", "enum": ["known", "unknown"]},
+    "anomaly_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+  },
+  "x-raw-message": {
+    "description": "Schema message tren topic raw-logs.* (dau ra replayer, bước 2)",
+    "required": ["source", "host", "ts", "ingest_time", "raw"],
+    "example": {"source": "BGL", "host": "R02-M1-N0-C:J12-U11", "ts": "2005-06-03T15:42:50Z", "ingest_time": "2026-11-08T09:00:00.123Z", "raw": "- 1117838570 2005.06.03 R02-M1-N0-C:J12-U11 2005-06-03-15.42.50.363779 R02-M1-N0-C:J12-U11 RAS KERNEL INFO instruction cache parity error corrected"}
+  }
+}

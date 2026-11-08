@@ -1,0 +1,16 @@
+apiVersion: 1
+datasources:
+  - name: PostgreSQL-logs
+    uid: pg-logs
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    user: app
+    isDefault: true
+    secureJsonData:
+      password: app
+    jsonData:
+      database: logs
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
