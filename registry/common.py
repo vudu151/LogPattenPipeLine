@@ -4,7 +4,7 @@ Quy uoc khoa Redis:
   drain3:<SRC>:warmup     snapshot cay Drain hoc trong warm-up (chi doc khi streaming)
   known:<SRC>             SET template_id hoc trong warm-up
   promoted:<SRC>          SET template_id unknown da lap lai du nhieu lan -> coi la known
-  warmup:<SRC>:lines      so dong goc da dung cho warm-up (replayer dung --skip bang so nay)
+  warmup:<SRC>:lines      so dong goc da dung cho warm-up (Log Producer dung --skip bang so nay)
 """
 import hashlib
 import os

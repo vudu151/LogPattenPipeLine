@@ -1,5 +1,5 @@
 # Hạ tầng cho pipeline phát hiện unknown log pattern (bước 1 / P0)
-# Dịch vụ: Kafka (KRaft, 1 node), Spark master + 2 worker, Redis, PostgreSQL, Grafana.
+# Dịch vụ: Kafka (KRaft, 1 node), Spark master + 2 worker, Redis, ClickHouse (OLAP), PostgreSQL (siêu dữ liệu), Grafana.
 # MinIO (data lake) nằm trong profile "lake": docker compose --profile lake up -d
 
 name: log-pattern-pipeline
@@ -9,7 +9,7 @@ services:
     image: apache/kafka:3.9.0
     container_name: kafka
     ports:
-      - "29092:29092"          # listener cho tiến trình trên máy host (replayer chạy ngoài docker)
+      - "29092:29092"          # listener cho tiến trình trên máy host (Log Producer chạy ngoài docker)
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -75,6 +75,32 @@ services:
       timeout: 5s
       retries: 5
 
+  # Kho OLAP cho log da chuan hoa. Storage Writer = engine Kafka + materialized view (clickhouse/init.sql).
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: clickhouse
+    ports:
+      - "8123:8123"           # HTTP: truy van, Grafana, bang dieu khien
+      - "19000:9000"          # native (9000 tren host de danh cho MinIO)
+    environment:
+      CLICKHOUSE_DB: logs
+      CLICKHOUSE_USER: app
+      CLICKHOUSE_PASSWORD: app
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ulimits:
+      nofile: {soft: 262144, hard: 262144}
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user app --password app -q 'SELECT 1' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   postgres:
     image: postgres:16-alpine
     container_name: postgres
@@ -108,7 +134,7 @@ services:
     environment:
       SPARK_NO_DAEMONIZE: "true"
     volumes:
-      - ./:/app               # code jobs/, parsers/, models/ ... nhìn thấy từ trong container
+      - ./:/app               # code jobs/, lib_log_handler/, models/ ... nhìn thấy từ trong container
       - spark-checkpoints:/checkpoints
     depends_on:
       kafka:
@@ -144,6 +170,7 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
@@ -169,6 +196,7 @@ services:
 
 volumes:
   kafka-data:
+  clickhouse-data:
   redis-data:
   postgres-data:
   grafana-data:

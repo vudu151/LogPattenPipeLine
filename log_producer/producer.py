@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Replayer: doc file log Loghub va phat len Kafka theo dung khoang cach thoi gian goc (nhan speed factor).
+"""Log Producer: nhan raw log tu cac he thong gia lap (tep Loghub) va ban len Message Queue (Kafka).
+
+Phat theo dung khoang cach thoi gian goc (nhan speed factor) de mo phong log phat sinh lien tuc.
 
 Vi du:
-  python replayer/replay.py --dataset BGL --speed 100
-  python replayer/replay.py --dataset BGL --sample --speed 50            # file 2k dong de test nhanh
-  python replayer/replay.py --dataset BGL --rate 2000 --limit 200000     # toc do co dinh 2000 event/s
-  python replayer/replay.py --dataset BGL --speed 100 --inject replayer/inject_templates.txt --at 0.5
-  python replayer/replay.py --dataset BGL --speed 100 --late-fraction 0.05 --late-max 20   # mo phong log den tre
+  python log_producer/producer.py --dataset BGL --speed 100
+  python log_producer/producer.py --dataset BGL --sample --speed 50     # file 2k dong de test nhanh
+  python log_producer/producer.py --dataset BGL --rate 2000 --limit 200000
+  python log_producer/producer.py --dataset BGL --speed 100 --inject log_producer/inject_templates.txt --at 0.5
+  python log_producer/producer.py --dataset BGL --speed 100 --late-fraction 0.05 --late-max 20   # log den tre
 
 Message gui len topic raw-logs.<dataset> (key = host):
   {"source": "BGL", "host": "...", "ts": "<event_time ISO UTC>", "ingest_time": "<luc gui>", "seq": 123, "raw": "<dong goc>"}
@@ -20,7 +22,7 @@ import time
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from parsers.base import DEFAULT_FILES, SAMPLE_FILES, format_raw, parse  # noqa: E402
+from lib_log_handler import DEFAULT_FILES, SAMPLE_FILES, format_raw, parse  # noqa: E402
 
 try:
     from confluent_kafka import Producer
@@ -57,7 +59,7 @@ class Stats:
         rate = (self.sent - self.last_sent) / max(t - self.last_t, 1e-6)
         self.last_t, self.last_sent = t, self.sent
         self.max_behind = max(self.max_behind, behind)
-        return ("[replay] sent={:,} rate={:,.0f} ev/s elapsed={:.0f}s behind_schedule={:.1f}s "
+        return ("[producer] sent={:,} rate={:,.0f} ev/s elapsed={:.0f}s behind_schedule={:.1f}s "
                 "parse_fail={} injected={} late={} deliver_err={}").format(
             self.sent, rate, t - self.t0, behind, self.parse_fail, self.injected, self.late, self.errors)
 
@@ -86,7 +88,7 @@ def main():
     root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "raw")
     path = args.file or os.path.join(root, (SAMPLE_FILES if args.sample else DEFAULT_FILES)[args.dataset])
     if not os.path.exists(path):
-        sys.exit("khong thay file {} (chay: bash data/download.sh {})".format(path, "2k" if args.sample else args.dataset))
+        sys.exit("khong thay file {} (chay: ./pipeline.sh download {})".format(path, "2k" if args.sample else args.dataset))
     topic = args.topic or "raw-logs." + args.dataset.lower()
     total_lines = args.limit
     if total_lines is None and args.sample:
@@ -135,7 +137,7 @@ def main():
                 keep.append((rel, m))
         pending_late[:] = keep
 
-    print("[replay] file={} topic={} speed={}x rate={} limit={} inject={} bootstrap={}".format(
+    print("[producer] file={} topic={} speed={}x rate={} limit={} inject={} bootstrap={}".format(
         path, topic, args.speed, args.rate, total_lines, len(inject_lines), args.bootstrap), flush=True)
 
     wall0 = None; ev0 = None; last_ev = None; seq = 0; n_orig = 0; next_stats = time.monotonic() + args.stats_every
@@ -192,7 +194,7 @@ def main():
                           "ingest_time": now_iso(), "seq": seq, "raw": raw, "injected": True})
                     seq += 1; st.injected += 1
                 injected_done = True
-                print("[replay] da tiem {} dong template la tai seq={}".format(args.inject_count, seq), flush=True)
+                print("[producer] da tiem {} dong template la tai seq={}".format(args.inject_count, seq), flush=True)
 
             if time.monotonic() >= next_stats:
                 print(st.line(behind), flush=True); next_stats = time.monotonic() + args.stats_every
@@ -201,7 +203,7 @@ def main():
     if producer is not None:
         producer.flush(30)
     print(st.line(0.0), flush=True)
-    print("[replay] xong. tong gui={:,} parse_fail={} deliver_err={} max_behind={:.1f}s".format(
+    print("[producer] xong. tong gui={:,} parse_fail={} deliver_err={} max_behind={:.1f}s".format(
         st.sent, st.parse_fail, st.errors, st.max_behind), flush=True)
 
 

@@ -14,7 +14,7 @@ from collections import Counter
 from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from parsers.base import DEFAULT_FILES, SAMPLE_FILES, parse  # noqa: E402
+from lib_log_handler import DEFAULT_FILES, SAMPLE_FILES, parse  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 

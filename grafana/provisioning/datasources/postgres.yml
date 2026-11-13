@@ -6,7 +6,7 @@ datasources:
     access: proxy
     url: postgres:5432
     user: app
-    isDefault: true
+    isDefault: false
     secureJsonData:
       password: app
     jsonData:
@@ -14,3 +14,15 @@ datasources:
       sslmode: disable
       postgresVersion: 1600
       timescaledb: false
+  - name: ClickHouse-logs
+    uid: ch-logs
+    type: grafana-clickhouse-datasource
+    access: proxy
+    jsonData:
+      host: clickhouse
+      port: 8123
+      protocol: http
+      username: app
+      defaultDatabase: logs
+    secureJsonData:
+      password: app

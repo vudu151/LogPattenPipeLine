@@ -20,7 +20,7 @@ import pandas as pd  # noqa: E402
 import psycopg2  # noqa: E402
 from drain3.redis_persistence import RedisPersistence  # noqa: E402
 
-from parsers.base import DEFAULT_FILES, parse  # noqa: E402
+from lib_log_handler import WARMUP_FILES, handle  # noqa: E402
 from registry.common import REDIS_HOST, REDIS_PORT, key, new_miner, redis_client, template_id  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
@@ -41,24 +41,26 @@ def main():
     ap.add_argument("--file")
     ap.add_argument("--fraction", type=float, default=0.2, help="ti le dong dau dung cho warm-up")
     ap.add_argument("--lines", type=int, help="so dong warm-up (ghi de --fraction)")
+    ap.add_argument("--skip-value", type=int, help="gia tri --skip ghi vao Redis (mac dinh = so dong warm-up; dat 0 khi tep phat lai khac tep warm-up)")
     ap.add_argument("--all-lines", dest="normal_only", action="store_false", help="hoc ca dong co nhan alert")
     ap.set_defaults(normal_only=True)
     args = ap.parse_args()
     src = args.dataset
-    path = args.file or os.path.join(ROOT, "data", "raw", DEFAULT_FILES[src])
+    path = args.file or os.path.join(ROOT, "data", "raw", WARMUP_FILES[src])
     n_lines = args.lines or int(count_lines(path) * args.fraction)
     print("[warmup] %s: hoc %d dong dau cua %s (normal_only=%s)" % (src, n_lines, path, args.normal_only), flush=True)
 
     redis_client().delete(key("snapshot", src))      # bat dau tu cay rong
     miner = new_miner(RedisPersistence(REDIS_HOST, REDIS_PORT, 0, None, False, key("snapshot", src)))
     t0 = time.time()
-    rows = []; learned = skipped = 0
+    rows = []; learned = skipped = rejected = 0
     with open(path, encoding="utf-8", errors="replace") as f:
         for i, line in enumerate(f):
             if i >= n_lines:
                 break
-            rec = parse(src, line.rstrip("\n"))
-            if rec is None:
+            action, _flags, rec = handle(src, line)
+            if action == "reject":                      # dong khong dat chat luong: khong hoc, khong ghi
+                rejected += 1
                 continue
             is_alert = rec["label"] not in (None, "normal")
             if args.normal_only and is_alert:
@@ -75,8 +77,8 @@ def main():
     for c in clusters:
         tpl = c.get_template()
         known[template_id(src, tpl, "K")] = (tpl, c.size)
-    print("[warmup] xong hoc: %d dong normal, bo qua %d dong alert, %d template known, %.0fs" % (
-        learned, skipped, len(known), time.time() - t0), flush=True)
+    print("[warmup] xong hoc: %d dong normal, bo qua %d dong alert, cach ly %d dong loi chat luong, %d template known, %.0fs" % (
+        learned, skipped, rejected, len(known), time.time() - t0), flush=True)
 
     # --- luu Redis ---
     miner.save_state("warmup")
@@ -84,7 +86,7 @@ def main():
     r.delete(key("known", src), key("promoted", src))
     if known:
         r.sadd(key("known", src), *known.keys())
-    r.set(key("lines", src), n_lines)
+    r.set(key("lines", src), n_lines if args.skip_value is None else args.skip_value)
 
     # --- gan template cho toan bo dong warm-up (ca dong alert) va ghi Parquet ---
     d = miner.drain
@@ -111,7 +113,7 @@ def main():
             "INSERT INTO templates (template_id, source, template, status, first_seen, last_seen, occurrences, from_warmup) "
             "VALUES (%s,%s,%s,'known',%s,%s,%s,true)",
             [(tid, src, tpl, first.to_pydatetime(), last.to_pydatetime(), size) for tid, (tpl, size) in known.items()])
-    print("[warmup] ghi %d template vao PostgreSQL. Replay tiep theo nen dung: --skip %d" % (len(known), n_lines), flush=True)
+    print("[warmup] ghi %d template vao PostgreSQL. Replay tiep theo nen dung: --skip %d" % (len(known), n_lines if args.skip_value is None else args.skip_value), flush=True)
 
 
 if __name__ == "__main__":

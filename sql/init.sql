@@ -1,4 +1,5 @@
--- Schema lưu kết quả pipeline (bước 1 / P0). Chạy tự động khi PostgreSQL khởi tạo lần đầu.
+-- Siêu dữ liệu và thống kê của pipeline (PostgreSQL): sổ mẫu, cửa sổ đã chấm điểm, chất lượng dữ liệu, hiệu năng.
+-- Log đã chuẩn hóa được lưu ở ClickHouse (clickhouse/init.sql).
 
 -- 1. Registry template: mỗi pattern Drain3 học được, kèm trạng thái known/unknown.
 CREATE TABLE IF NOT EXISTS templates (
@@ -12,27 +13,7 @@ CREATE TABLE IF NOT EXISTS templates (
     from_warmup     BOOLEAN NOT NULL DEFAULT FALSE   -- TRUE nếu học trong giai đoạn warm-up
 );
 
--- 2. Lịch sử log đã parse (mediated schema chung cho mọi nguồn).
-CREATE TABLE IF NOT EXISTS log_history (
-    id              BIGSERIAL PRIMARY KEY,
-    event_time      TIMESTAMPTZ NOT NULL,            -- thời điểm trong log gốc
-    ingest_time     TIMESTAMPTZ NOT NULL,            -- thời điểm vào Kafka (replayer gắn)
-    processed_time  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    source          TEXT NOT NULL,
-    host            TEXT,
-    level           TEXT,
-    component       TEXT,
-    content         TEXT NOT NULL,
-    template_id     TEXT,
-    status          TEXT NOT NULL CHECK (status IN ('known','unknown')),
-    anomaly_score   DOUBLE PRECISION,                -- điểm Isolation Forest của window chứa dòng này
-    label           TEXT,                            -- nhãn ground truth nếu dataset có (BGL: '-' hoặc alert)
-    raw             TEXT
-);
-CREATE INDEX IF NOT EXISTS ix_log_history_event_time ON log_history (event_time DESC);
-CREATE INDEX IF NOT EXISTS ix_log_history_status     ON log_history (status, event_time DESC);
-CREATE INDEX IF NOT EXISTS ix_log_history_host       ON log_history (host, event_time DESC);
-CREATE INDEX IF NOT EXISTS ix_log_history_template   ON log_history (template_id);
+-- 2. (Log đã chuẩn hóa không còn nằm ở đây: xem kho OLAP ClickHouse, bảng logs.log_events.)
 
 -- 3. Cảnh báo theo window (đầu ra của Spark job 2).
 CREATE TABLE IF NOT EXISTS window_alerts (
@@ -59,7 +40,7 @@ CREATE INDEX IF NOT EXISTS ix_window_alerts_anomaly ON window_alerts (is_anomaly
 -- 4. Metric hiệu năng pipeline, một dòng mỗi ~10 giây.
 CREATE TABLE IF NOT EXISTS pipeline_metrics (
     ts                  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    stage               TEXT NOT NULL,               -- replayer | job1_parse | job2_detect
+    stage               TEXT NOT NULL,               -- job1_parse | job2_detect
     events_per_sec      DOUBLE PRECISION,
     batch_duration_ms   DOUBLE PRECISION,            -- processing time của micro-batch
     trigger_interval_ms DOUBLE PRECISION,
@@ -70,11 +51,12 @@ CREATE TABLE IF NOT EXISTS pipeline_metrics (
     PRIMARY KEY (ts, stage)
 );
 
--- View tiện cho dashboard: tỉ lệ known/unknown theo phút.
-CREATE OR REPLACE VIEW v_status_per_minute AS
-SELECT date_trunc('minute', event_time) AS minute,
-       source,
-       count(*) FILTER (WHERE status = 'known')   AS n_known,
-       count(*) FILTER (WHERE status = 'unknown') AS n_unknown
-FROM log_history
-GROUP BY 1, 2;
+-- 5. Thống kê chất lượng dữ liệu: mỗi lô của job 1 ghi số dòng theo nguồn, luật và hành động.
+CREATE TABLE IF NOT EXISTS data_quality (
+    ts      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    source  TEXT NOT NULL,
+    rule    TEXT NOT NULL,          -- tên luật trong lib_log_handler/normalizer.py, hoặc TOTAL
+    action  TEXT NOT NULL,          -- ok | repair | reject
+    n       BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_data_quality_ts ON data_quality (ts DESC);

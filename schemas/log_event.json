@@ -1,27 +1,32 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "LogEvent",
-  "description": "Mediated schema chung cho moi nguon log sau khi parse (dau ra Spark job 1, topic parsed-logs).",
+  "description": "Luoc do trung gian chung cho moi nguon log: message tren topic parsed-logs (dau ra job 1) va bang logs.log_events trong ClickHouse. Dinh nghia goc nam o lib_log_handler/schema.py.",
   "type": "object",
-  "required": ["event_time", "ingest_time", "source", "content", "raw", "template_id", "template", "status"],
+  "required": ["event_time", "ingest_time", "processed_time", "source", "content", "raw", "template_id", "template", "status"],
   "properties": {
-    "event_time":    {"type": "string", "format": "date-time", "description": "Thoi diem trong log goc, ISO 8601 UTC"},
-    "ingest_time":   {"type": "string", "format": "date-time", "description": "Thoi diem replayer day vao Kafka"},
-    "source":        {"type": "string", "enum": ["BGL", "HDFS", "OpenStack"]},
-    "host":          {"type": ["string", "null"], "description": "BGL: node; HDFS: block_id hoac pid; OpenStack: instance_id"},
-    "level":         {"type": ["string", "null"], "description": "INFO | WARN | ERROR | FATAL | ..."},
-    "component":     {"type": ["string", "null"], "description": "BGL: KERNEL/APP...; HDFS: dfs.DataNode...; OpenStack: nova.compute..."},
-    "content":       {"type": "string", "description": "Phan noi dung sau header, dau vao cua Drain3"},
-    "raw":           {"type": "string", "description": "Dong log nguyen ban"},
-    "label":         {"type": ["string", "null"], "description": "Nhan ground truth neu co (BGL: '-' la normal)"},
-    "template_id":   {"type": "string"},
-    "template":      {"type": "string", "description": "Pattern voi <*> thay cho tham so"},
-    "status":        {"type": "string", "enum": ["known", "unknown"]},
-    "anomaly_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+    "event_time":     {"type": "string", "format": "date-time", "description": "Thoi diem ghi trong log goc, ISO 8601 UTC"},
+    "ingest_time":    {"type": "string", "format": "date-time", "description": "Thoi diem Log Producer gui vao Kafka"},
+    "processed_time": {"type": "string", "format": "date-time", "description": "Thoi diem job 1 xu ly"},
+    "source":         {"type": "string", "enum": ["BGL", "HDFS", "OpenStack"]},
+    "host":           {"type": "string", "description": "Thuc the: nut (BGL), ma khoi (HDFS), ma may ao (OpenStack); UNKNOWN neu thieu"},
+    "level":          {"type": ["string", "null"], "description": "Ma muc log nguyen ban cua nguon"},
+    "severity":       {"type": "string", "enum": ["INFO", "WARN", "ERROR", "FATAL"], "description": "Muc log theo thang chung (tu dien ma)"},
+    "component":      {"type": ["string", "null"], "description": "Thanh phan sinh log"},
+    "content":        {"type": "string", "description": "Noi dung thong diep, dau vao cua Drain"},
+    "label":          {"type": ["string", "null"], "description": "Nhan co san: 'normal', ma bat thuong, hoac INJECT voi dong chen"},
+    "template_id":    {"type": "string", "description": "Dinh danh mau: K... (known) hoac U... (unknown)"},
+    "template":       {"type": "string", "description": "Mau log voi <*> thay cho tham so"},
+    "status":         {"type": "string", "enum": ["known", "unknown"]},
+    "quality_flags":  {"type": "string", "description": "Cac co chat luong, cach nhau dau phay (vd missing_host)"},
+    "action":         {"type": "string", "enum": ["ok", "repair"], "description": "Ket qua normalizer; dong 'reject' di sang topic rejected-logs"},
+    "injected":       {"type": "boolean", "description": "true neu la dong mau la do Log Producer chen vao"},
+    "seq":            {"type": "integer", "description": "So thu tu dong trong lan phat"},
+    "raw":            {"type": "string", "description": "Dong log nguyen ban"}
   },
   "x-raw-message": {
-    "description": "Schema message tren topic raw-logs.* (dau ra replayer, bước 2)",
-    "required": ["source", "host", "ts", "ingest_time", "raw"],
-    "example": {"source": "BGL", "host": "R02-M1-N0-C:J12-U11", "ts": "2005-06-03T15:42:50Z", "ingest_time": "2026-11-08T09:00:00.123Z", "raw": "- 1117838570 2005.06.03 R02-M1-N0-C:J12-U11 2005-06-03-15.42.50.363779 R02-M1-N0-C:J12-U11 RAS KERNEL INFO instruction cache parity error corrected"}
+    "description": "Message tren topic raw-logs.* (dau ra Log Producer)",
+    "required": ["source", "host", "ts", "ingest_time", "seq", "raw"],
+    "example": {"source": "BGL", "host": "R02-M1-N0-C:J12-U11", "ts": "2005-06-03T15:42:50.363779Z", "ingest_time": "2026-11-08T09:00:00.123Z", "seq": 1, "raw": "- 1117838570 2005.06.03 R02-M1-N0-C:J12-U11 2005-06-03-15.42.50.363779 R02-M1-N0-C:J12-U11 RAS KERNEL INFO instruction cache parity error corrected"}
   }
 }

@@ -1,0 +1,491 @@
+{
+ "uid": "log-pattern-pipeline",
+ "title": "Log Pattern Pipeline",
+ "tags": [
+  "log",
+  "it5427"
+ ],
+ "timezone": "browser",
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "10s",
+ "time": {
+  "from": "now-30m",
+  "to": "now"
+ },
+ "panels": [
+  {
+   "id": 1,
+   "title": "Dòng log trong kho OLAP",
+   "type": "stat",
+   "datasource": {
+    "type": "grafana-clickhouse-datasource",
+    "uid": "ch-logs"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-clickhouse-datasource",
+      "uid": "ch-logs"
+     },
+     "editorType": "sql",
+     "format": 1,
+     "queryType": "table",
+     "rawSql": "SELECT count() FROM logs.log_events",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "blue"
+     },
+     "unit": "short"
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 2,
+   "title": "Dòng unknown",
+   "type": "stat",
+   "datasource": {
+    "type": "grafana-clickhouse-datasource",
+    "uid": "ch-logs"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-clickhouse-datasource",
+      "uid": "ch-logs"
+     },
+     "editorType": "sql",
+     "format": 1,
+     "queryType": "table",
+     "rawSql": "SELECT countIf(status = 'unknown') FROM logs.log_events",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 6,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "orange"
+     },
+     "unit": "short"
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 3,
+   "title": "Dòng bị cách ly",
+   "type": "stat",
+   "datasource": {
+    "type": "grafana-clickhouse-datasource",
+    "uid": "ch-logs"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-clickhouse-datasource",
+      "uid": "ch-logs"
+     },
+     "editorType": "sql",
+     "format": 1,
+     "queryType": "table",
+     "rawSql": "SELECT count() FROM logs.rejected_logs",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 12,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "red"
+     },
+     "unit": "short"
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 4,
+   "title": "Cảnh báo",
+   "type": "stat",
+   "datasource": {
+    "type": "grafana-clickhouse-datasource",
+    "uid": "ch-logs"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-clickhouse-datasource",
+      "uid": "ch-logs"
+     },
+     "editorType": "sql",
+     "format": 1,
+     "queryType": "table",
+     "rawSql": "SELECT count() FROM logs.alerts",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 18,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "purple"
+     },
+     "unit": "short"
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 5,
+   "title": "Tốc độ ghi vào kho theo nguồn (dòng / 10 giây, theo thời điểm xử lý)",
+   "type": "timeseries",
+   "datasource": {
+    "type": "grafana-clickhouse-datasource",
+    "uid": "ch-logs"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-clickhouse-datasource",
+      "uid": "ch-logs"
+     },
+     "editorType": "sql",
+     "format": 0,
+     "queryType": "timeseries",
+     "rawSql": "SELECT toStartOfInterval(processed_time, INTERVAL 10 second) AS time, source, count() AS dong FROM logs.log_events WHERE $__timeFilter(processed_time) GROUP BY time, source ORDER BY time",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 0,
+    "y": 4,
+    "w": 14,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never"
+     },
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   }
+  },
+  {
+   "id": 6,
+   "title": "Mức log theo thang chung, theo nguồn",
+   "type": "table",
+   "datasource": {
+    "type": "grafana-clickhouse-datasource",
+    "uid": "ch-logs"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-clickhouse-datasource",
+      "uid": "ch-logs"
+     },
+     "editorType": "sql",
+     "format": 1,
+     "queryType": "table",
+     "rawSql": "SELECT source AS nguon, severity AS muc, count() AS dong FROM logs.log_events GROUP BY source, severity ORDER BY source, dong DESC",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 14,
+    "y": 4,
+    "w": 10,
+    "h": 8
+   }
+  },
+  {
+   "id": 7,
+   "title": "Cảnh báo mới nhất (Alert System)",
+   "type": "table",
+   "datasource": {
+    "type": "grafana-clickhouse-datasource",
+    "uid": "ch-logs"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-clickhouse-datasource",
+      "uid": "ch-logs"
+     },
+     "editorType": "sql",
+     "format": 1,
+     "queryType": "table",
+     "rawSql": "SELECT detected_at AS luc, level AS muc, type AS loai, source AS nguon, title AS noi_dung FROM logs.alerts ORDER BY detected_at DESC LIMIT 50",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 0,
+    "y": 12,
+    "w": 14,
+    "h": 9
+   }
+  },
+  {
+   "id": 8,
+   "title": "Mẫu log mới (unknown)",
+   "type": "table",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "pg-logs"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "pg-logs"
+     },
+     "editorMode": "code",
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT source AS nguon, status AS trang_thai, occurrences AS so_lan, template AS mau FROM templates WHERE NOT from_warmup ORDER BY first_seen DESC LIMIT 50",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 14,
+    "y": 12,
+    "w": 10,
+    "h": 9
+   }
+  },
+  {
+   "id": 9,
+   "title": "Dòng unknown gần nhất",
+   "type": "table",
+   "datasource": {
+    "type": "grafana-clickhouse-datasource",
+    "uid": "ch-logs"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-clickhouse-datasource",
+      "uid": "ch-logs"
+     },
+     "editorType": "sql",
+     "format": 1,
+     "queryType": "table",
+     "rawSql": "SELECT event_time, source, host, severity, template_id, substring(content, 1, 120) AS content FROM logs.log_events WHERE status = 'unknown' ORDER BY processed_time DESC LIMIT 100",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 0,
+    "y": 21,
+    "w": 14,
+    "h": 9
+   }
+  },
+  {
+   "id": 10,
+   "title": "Chất lượng dữ liệu theo luật",
+   "type": "table",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "pg-logs"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "pg-logs"
+     },
+     "editorMode": "code",
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT source AS nguon, rule AS luat, action AS hanh_dong, sum(n) AS dong FROM data_quality GROUP BY 1,2,3 ORDER BY 1,2",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 14,
+    "y": 21,
+    "w": 10,
+    "h": 9
+   }
+  },
+  {
+   "id": 11,
+   "title": "Job 1: thời gian xử lý lô và độ trễ p95 (ms)",
+   "type": "timeseries",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "pg-logs"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "pg-logs"
+     },
+     "editorMode": "code",
+     "format": "time_series",
+     "rawQuery": true,
+     "rawSql": "SELECT ts AS time, batch_duration_ms AS \"xử lý lô\", latency_p95_ms AS \"độ trễ p95\" FROM pipeline_metrics WHERE stage = 'job1_parse' AND $__timeFilter(ts) ORDER BY ts",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 0,
+    "y": 30,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 2,
+      "fillOpacity": 15,
+      "showPoints": "never"
+     },
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   }
+  },
+  {
+   "id": 12,
+   "title": "Cửa sổ theo nguồn và lý do",
+   "type": "table",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "pg-logs"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "pg-logs"
+     },
+     "editorMode": "code",
+     "format": "table",
+     "rawQuery": true,
+     "rawSql": "SELECT source AS nguon, reason AS ly_do, count(*) AS so_cua_so, count(*) FILTER (WHERE label = 'alert') AS co_nhan_duong_tinh FROM window_alerts GROUP BY 1,2 ORDER BY 1,2",
+     "refId": "A"
+    }
+   ],
+   "gridPos": {
+    "x": 12,
+    "y": 30,
+    "w": 12,
+    "h": 8
+   }
+  }
+ ],
+ "templating": {
+  "list": []
+ },
+ "annotations": {
+  "list": []
+ },
+ "editable": true
+}

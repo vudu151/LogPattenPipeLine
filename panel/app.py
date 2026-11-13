@@ -14,6 +14,7 @@ PIPE = os.environ.get("PIPELINE_DIR", os.path.expanduser("~/work/log-pattern-pip
 LOGS = os.path.join(PIPE, "lake", "logs")
 os.makedirs(LOGS, exist_ok=True)
 PG = "postgresql://app:app@localhost:5432/logs"
+CH = dict(host="localhost", port=8123, username="app", password="app", database="logs")
 
 st.set_page_config(page_title="Log Pattern Pipeline", page_icon="🧭", layout="wide")
 st.markdown("""<style>
@@ -66,9 +67,33 @@ def replay_pid():
         return None
 
 
+def alert_pid():
+    p = os.path.join(LOGS, "alert.pid")
+    if not os.path.exists(p):
+        return None
+    try:
+        pid = int(open(p).read().strip()); os.kill(pid, 0); return pid
+    except (ValueError, ProcessLookupError, PermissionError):
+        return None
+
+
+def start_alert():
+    log = open(os.path.join(LOGS, "alert_service.log"), "w")
+    proc = subprocess.Popen([".venv/bin/python", "-u", "alerting/alert_service.py", "--suppress", "20"], cwd=PIPE, stdout=log,
+                            stderr=subprocess.STDOUT, start_new_session=True)
+    open(os.path.join(LOGS, "alert.pid"), "w").write(str(proc.pid))
+    return proc.pid
+
+
+def stop_alert():
+    pid = alert_pid()
+    if pid:
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+
+
 def start_replay(args):
     log = open(os.path.join(LOGS, "replay.log"), "w")
-    proc = subprocess.Popen([".venv/bin/python", "replayer/replay.py"] + args, cwd=PIPE, stdout=log, stderr=subprocess.STDOUT,
+    proc = subprocess.Popen([".venv/bin/python", "log_producer/producer.py"] + args, cwd=PIPE, stdout=log, stderr=subprocess.STDOUT,
                             start_new_session=True)
     open(os.path.join(LOGS, "replay.pid"), "w").write(str(proc.pid))
     return proc.pid
@@ -87,10 +112,27 @@ def pg_engine():
 
 
 def q(sql):
+    """Truy van PostgreSQL (sieu du lieu: so mau, cua so, chat luong, hieu nang)."""
     try:
         return pd.read_sql(sql, pg_engine())
     except Exception as e:  # noqa: BLE001
         return pd.DataFrame({"lỗi": [str(e)[:200]]})
+
+
+@st.cache_resource
+def ch_client():
+    import clickhouse_connect
+    return clickhouse_connect.get_client(**CH)
+
+
+def ch(sql, params=None):
+    """Truy van ClickHouse (kho OLAP: log da chuan hoa, dong bi cach ly, canh bao). Tra ve (DataFrame, so ms)."""
+    t0 = time.time()
+    try:
+        df = ch_client().query_df(sql, parameters=params or {})
+    except Exception as e:  # noqa: BLE001
+        df = pd.DataFrame({"lỗi": [str(e)[:300]]})
+    return df, (time.time() - t0) * 1000
 
 
 # ---------------- sidebar: trang thai ----------------
@@ -105,9 +147,9 @@ with st.sidebar:
     st.caption(", ".join(ups) or "không có")
     c1, c2 = st.columns(2)
     st.markdown("**Spark job**")
-    st.write(("🟢" if job_running(1) else "⚪") + " job 1 · " + ("🟢" if job_running(2) else "⚪") + " job 2 · " + ("🟢" if replay_pid() else "⚪") + " replayer")
+    st.write(("🟢" if job_running(1) else "⚪") + " job 1 · " + ("🟢" if job_running(2) else "⚪") + " job 2 · " + ("🟢" if replay_pid() else "⚪") + " producer · " + ("🟢" if alert_pid() else "⚪") + " alert")
     st.markdown("**Giao diện khác**")
-    st.markdown("- [Kafka UI](http://localhost:8090) · topic, message\n- [Spark master](http://localhost:8080) · worker, job\n- [Spark job 1](http://localhost:4040) · [job 2](http://localhost:4041)\n- [Grafana](http://localhost:3000) · dashboard")
+    st.markdown("- [Kafka UI](http://localhost:8090) · topic, message\n- [Spark master](http://localhost:8080) · worker, job\n- [Spark job 1](http://localhost:4040) · [job 2](http://localhost:4041)\n- [Grafana](http://localhost:3000) · dashboard\n- [ClickHouse](http://localhost:8123/play?user=app&password=app) · SQL")
     st.markdown("**Hạ tầng**")
     if st.button("▶ Bật hạ tầng (up)", use_container_width=True):
         run_and_show("up", ["up"])
@@ -116,12 +158,12 @@ with st.sidebar:
     if st.button("■ Tắt hạ tầng (down)", use_container_width=True):
         run_and_show("down", ["down"])
 
-tab_demo, tab_prep, tab_run, tab_res = st.tabs(["🚀 Demo nhanh", "1 · Chuẩn bị", "2 · Chạy", "3 · Kết quả"])
+tab_demo, tab_prep, tab_run, tab_res = st.tabs(["🚀 Demo nhanh", "1 · Chuẩn bị", "2 · Chạy", "3 · Tìm kiếm và kết quả"])
 
 # ---------------- tab demo nhanh ----------------
 with tab_demo:
     st.subheader("Kịch bản demo trong một nút")
-    st.markdown("Giả định: hạ tầng đã bật, đã warm-up và train (tab Chuẩn bị). Nút này sẽ: bật job 1 và job 2 nếu chưa chạy, rồi phát log có tiêm mẫu lạ.")
+    st.markdown("Giả định: hạ tầng đã bật, đã warm-up và train (tab Chuẩn bị). Nút này sẽ: bật job 1, job 2 và Alert System nếu chưa chạy, rồi phát log có chèn mẫu lạ.")
     c1, c2, c3 = st.columns(3)
     d_skip = c1.number_input("Bỏ qua N dòng đầu (sau warm-up)", value=1109592, step=10000)
     d_limit = c2.number_input("Phát bao nhiêu dòng", value=60000, step=10000)
@@ -132,33 +174,36 @@ with tab_demo:
                 st.write("Bật job 1…"); sh(["job1"]); time.sleep(25)
             if not job_running(2):
                 st.write("Bật job 2…"); sh(["job2"]); time.sleep(25)
+            if not alert_pid():
+                st.write("Bật Alert System…"); start_alert()
             if replay_pid():
                 stop_replay(); time.sleep(1)
             pid = start_replay(["--dataset", "BGL", "--skip", str(int(d_skip)), "--limit", str(int(d_limit)), "--rate", str(int(d_rate)),
-                                "--inject", "replayer/inject_templates.txt", "--at", "0.5", "--inject-count", "50", "--stats-every", "5"])
-            st.write(f"Replayer đang phát (pid {pid}). Xem tab Kết quả hoặc Kafka UI.")
+                                "--inject", "log_producer/inject_templates.txt", "--at", "0.5", "--inject-count", "50", "--stats-every", "5"])
+            st.write(f"Log Producer đang phát (pid {pid}). Xem tab Kết quả hoặc Kafka UI.")
             box.update(label="Demo đang chạy", state="complete")
-    if st.button("⏹ Dừng replayer"):
-        stop_replay(); st.success("Đã dừng replayer")
+    if st.button("⏹ Dừng producer"):
+        stop_replay(); st.success("Đã dừng producer")
 
     @st.fragment(run_every=5)
     def live():
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown("**Replayer**"); st.code(tail(os.path.join(LOGS, "replay.log"), 8), language="text")
-            st.markdown("**Job 1 (parse, Drain3)**"); st.code(tail(os.path.join(LOGS, "job1.log"), 6, ["[job1]"]), language="text")
-            st.markdown("**Job 2 (window, Isolation Forest)**"); st.code(tail(os.path.join(LOGS, "job2.log"), 6, ["[job2]"]), language="text")
+            st.markdown("**Log Producer**"); st.code(tail(os.path.join(LOGS, "replay.log"), 6), language="text")
+            st.markdown("**Job 1 (lib-log-handler, Drain3)**"); st.code(tail(os.path.join(LOGS, "job1.log"), 5, ["[job1]"]), language="text")
+            st.markdown("**Job 2 (cửa sổ, Isolation Forest)**"); st.code(tail(os.path.join(LOGS, "job2.log"), 5, ["[job2]"]), language="text")
+            st.markdown("**Alert System**"); st.code(tail(os.path.join(LOGS, "alert_service.log"), 8), language="text")
         with c2:
-            st.markdown("**Số liệu trong PostgreSQL**")
-            st.dataframe(q("""SELECT (SELECT count(*) FROM log_history) AS log_history,
-                                      (SELECT count(*) FROM log_history WHERE status='unknown') AS dong_unknown,
-                                      (SELECT count(*) FROM templates WHERE NOT from_warmup) AS mau_moi,
-                                      (SELECT count(*) FROM window_alerts) AS phut,
-                                      (SELECT count(*) FROM window_alerts WHERE is_anomaly) AS phut_bat_thuong"""), hide_index=True, use_container_width=True)
+            st.markdown("**Kho OLAP (ClickHouse)**")
+            df, ms = ch("""SELECT source, count() AS dong, countIf(status = 'unknown') AS dong_unknown,
+                                  uniqExact(template_id) AS so_mau, countIf(quality_flags != '') AS dong_co_co
+                           FROM logs.log_events GROUP BY source ORDER BY source""")
+            st.dataframe(df, hide_index=True, use_container_width=True); st.caption("truy vấn %.0f ms" % ms)
             st.markdown("**Mẫu mới phát hiện (unknown)**")
-            st.dataframe(q("SELECT template_id, status, occurrences, template FROM templates WHERE NOT from_warmup ORDER BY first_seen DESC LIMIT 8"), hide_index=True, use_container_width=True)
-            st.markdown("**Phút bất thường mới nhất**")
-            st.dataframe(q("SELECT window_start, n_events, n_unknown, n_error, round(score::numeric,3) AS score, reason, label FROM window_alerts WHERE is_anomaly ORDER BY detected_at DESC LIMIT 8"), hide_index=True, use_container_width=True)
+            st.dataframe(q("SELECT source, template_id, occurrences, template FROM templates WHERE NOT from_warmup ORDER BY first_seen DESC LIMIT 8"), hide_index=True, use_container_width=True)
+            st.markdown("**Cảnh báo mới nhất**")
+            df, _ = ch("SELECT detected_at, level, type, title FROM logs.alerts ORDER BY detected_at DESC LIMIT 8")
+            st.dataframe(df, hide_index=True, use_container_width=True)
     live()
 
 # ---------------- tab chuan bi ----------------
@@ -220,7 +265,7 @@ with tab_run:
             run_and_show("job2-reset", ["job2-reset"])
         st.code(tail(os.path.join(LOGS, "job2.log"), 12, ["[job2]", "Error", "Exception"]), language="text")
     with c2:
-        st.markdown("**Replayer · phát log lên Kafka**  " + ("🟢 đang phát" if replay_pid() else "⚪ dừng"))
+        st.markdown("**Log Producer · phát log lên Kafka**  " + ("🟢 đang phát" if replay_pid() else "⚪ dừng"))
         with st.form("replay"):
             r1, r2 = st.columns(2)
             ds = r1.selectbox("Dataset", ["BGL", "HDFS", "OpenStack"])
@@ -239,16 +284,23 @@ with tab_run:
             if sample: args.append("--sample")
             if limit: args += ["--limit", str(int(limit))]
             args += ["--rate", str(int(val))] if mode.startswith("Đều") else ["--speed", str(int(val))]
-            if inject: args += ["--inject", "replayer/inject_templates.txt", "--at", str(at), "--inject-count", "50"]
+            if inject: args += ["--inject", "log_producer/inject_templates.txt", "--at", str(at), "--inject-count", "50"]
             if late: args += ["--late-fraction", str(late), "--late-max", "10"]
             pid = start_replay(args)
-            st.success(f"Đang phát (pid {pid}): replay.py {' '.join(args)}")
+            st.success(f"Đang phát (pid {pid}): producer.py {' '.join(args)}")
         if st.button("■ Dừng phát"):
             stop_replay(); st.success("Đã dừng")
         st.code(tail(os.path.join(LOGS, "replay.log"), 12), language="text")
+        st.markdown("**Alert System**  " + ("🟢 đang chạy" if alert_pid() else "⚪ dừng"))
+        a1, a2 = st.columns(2)
+        if a1.button("▶ Bật Alert System"):
+            start_alert(); st.success("Đã bật")
+        if a2.button("■ Dừng Alert System"):
+            stop_alert(); st.success("Đã dừng")
+        st.code(tail(os.path.join(LOGS, "alert_service.log"), 8), language="text")
         st.markdown("**Kafka**")
         k1, k2 = st.columns(2)
-        topic = k1.selectbox("Topic", ["raw-logs.bgl", "parsed-logs", "raw-logs.hdfs", "raw-logs.openstack"])
+        topic = k1.selectbox("Topic", ["raw-logs.bgl", "parsed-logs", "raw-logs.hdfs", "raw-logs.openstack", "rejected-logs", "alerts"])
         if k2.button("Đếm message"):
             ok, out = sh(["count", topic]); st.code(out, language="text")
         if st.button("Xem 3 message đầu"):
@@ -256,32 +308,55 @@ with tab_run:
 
 # ---------------- tab ket qua ----------------
 with tab_res:
-    st.subheader("Kết quả trong PostgreSQL")
-    if st.button("🔄 Làm mới"):
-        st.rerun()
-    st.markdown("**Tổng quan**")
-    st.dataframe(q("""SELECT (SELECT count(*) FROM templates WHERE from_warmup) AS mau_known_warmup,
-                              (SELECT count(*) FROM templates WHERE NOT from_warmup) AS mau_moi,
-                              (SELECT count(*) FROM log_history) AS dong_log,
-                              (SELECT count(*) FROM log_history WHERE status='unknown') AS dong_unknown,
-                              (SELECT count(*) FROM window_alerts) AS phut,
-                              (SELECT count(*) FROM window_alerts WHERE is_anomaly) AS phut_bat_thuong,
-                              (SELECT count(*) FROM window_alerts WHERE label='alert') AS phut_co_nhan_alert"""), hide_index=True, use_container_width=True)
-    st.markdown("**Phút bất thường theo lý do**")
-    st.dataframe(q("""SELECT reason, count(*) AS so_phut, sum(n_events) AS so_dong, round(avg(score)::numeric,3) AS diem_tb,
-                             count(*) FILTER (WHERE label='alert') AS co_nhan_alert FROM window_alerts GROUP BY 1 ORDER BY 1"""), hide_index=True, use_container_width=True)
+    st.subheader("Tìm kiếm log trong kho OLAP (ClickHouse)")
+    f1, f2, f3, f4 = st.columns([1, 1, 2, 1])
+    src = f1.selectbox("Nguồn", ["tất cả", "BGL", "HDFS", "OpenStack"])
+    stt = f2.selectbox("Trạng thái", ["tất cả", "unknown", "known"])
+    kw = f3.text_input("Từ khóa trong nội dung", "")
+    n = f4.slider("Số dòng", 20, 500, 100)
+    conds = ["1"]; params = {}
+    if src != "tất cả": conds.append("source = {src:String}"); params["src"] = src
+    if stt != "tất cả": conds.append("status = {stt:String}"); params["stt"] = stt
+    if kw.strip(): conds.append("positionCaseInsensitive(content, {kw:String}) > 0"); params["kw"] = kw.strip()
+    df, ms = ch("SELECT event_time, source, host, severity, status, template_id, quality_flags, substring(content, 1, 140) AS content "
+                "FROM logs.log_events WHERE " + " AND ".join(conds) + " ORDER BY processed_time DESC LIMIT %d" % n, params)
+    st.dataframe(df, hide_index=True, use_container_width=True); st.caption("truy vấn %.0f ms" % ms)
+
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("**Mẫu mới (unknown / promoted)**")
-        st.dataframe(q("SELECT template_id, status, occurrences, first_seen, template FROM templates WHERE NOT from_warmup ORDER BY first_seen DESC LIMIT 30"), hide_index=True, use_container_width=True)
+        st.markdown("**Tổng hợp theo nguồn và mức log chung**")
+        df, ms = ch("SELECT source, severity, count() AS dong FROM logs.log_events GROUP BY source, severity ORDER BY source, dong DESC")
+        st.dataframe(df, hide_index=True, use_container_width=True); st.caption("truy vấn %.0f ms" % ms)
+        st.markdown("**Dòng bị cách ly (rejected_logs)**")
+        df, _ = ch("SELECT source, quality_flags, count() AS dong FROM logs.rejected_logs GROUP BY source, quality_flags ORDER BY dong DESC")
+        st.dataframe(df, hide_index=True, use_container_width=True)
     with c2:
-        st.markdown("**Top phút bất thường theo điểm**")
-        st.dataframe(q("SELECT window_start, host, n_events, n_unknown, n_error, round(score::numeric,3) AS score, reason, label, top_templates->>'top' AS top FROM window_alerts WHERE is_anomaly ORDER BY score DESC LIMIT 30"), hide_index=True, use_container_width=True)
-    st.markdown("**Log history**")
-    f1, f2 = st.columns(2)
-    stt = f1.selectbox("Trạng thái", ["tất cả", "unknown", "known"])
-    n = f2.slider("Số dòng", 20, 500, 100)
-    where = "" if stt == "tất cả" else f"WHERE status='{stt}'"
-    st.dataframe(q(f"SELECT event_time, host, level, status, template_id, round(anomaly_score::numeric,3) AS score, left(content,120) AS content FROM log_history {where} ORDER BY id DESC LIMIT {n}"), hide_index=True, use_container_width=True)
-    st.markdown("**Hiệu năng (pipeline_metrics, 30 mẫu gần nhất)**")
-    st.dataframe(q("SELECT ts, stage, round(events_per_sec) AS ev_s, round(batch_duration_ms) AS batch_ms, round(latency_p50_ms) AS p50_ms, round(latency_p95_ms) AS p95_ms FROM pipeline_metrics ORDER BY ts DESC LIMIT 30"), hide_index=True, use_container_width=True)
+        st.markdown("**Cảnh báo (alerts)**")
+        df, _ = ch("SELECT detected_at, level, type, source, title FROM logs.alerts ORDER BY detected_at DESC LIMIT 30")
+        st.dataframe(df, hide_index=True, use_container_width=True)
+    st.markdown("**Viết lại truy vấn theo mô tả nguồn LAV**")
+    from lib_log_handler import lav
+    l1, l2 = st.columns(2)
+    gran = l1.selectbox("Nhãn gán theo", ["bất kỳ", "line", "entity"])
+    ent = l2.selectbox("Thực thể", ["bất kỳ", "node", "block", "instance"])
+    w = {}
+    if gran != "bất kỳ": w["label_granularity"] = gran
+    if ent != "bất kỳ": w["entity"] = ent
+    st.write("Nguồn trả lời được:", lav.select_sources(["event_time", "host", "label"], w) or "không có")
+    st.code(lav.rewrite(["event_time", "host", "label"], w), language="sql")
+
+    st.subheader("Siêu dữ liệu trong PostgreSQL")
+    if st.button("🔄 Làm mới"):
+        st.rerun()
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**Cửa sổ theo nguồn và lý do**")
+        st.dataframe(q("""SELECT source, reason, count(*) AS so_cua_so, count(*) FILTER (WHERE label='alert') AS co_nhan_duong_tinh
+                          FROM window_alerts GROUP BY 1,2 ORDER BY 1,2"""), hide_index=True, use_container_width=True)
+        st.markdown("**Chất lượng dữ liệu theo luật (data_quality)**")
+        st.dataframe(q("SELECT source, rule, action, sum(n) AS dong FROM data_quality GROUP BY 1,2,3 ORDER BY 1,2"), hide_index=True, use_container_width=True)
+    with c2:
+        st.markdown("**Mẫu mới (unknown / promoted)**")
+        st.dataframe(q("SELECT source, template_id, status, occurrences, template FROM templates WHERE NOT from_warmup ORDER BY first_seen DESC LIMIT 30"), hide_index=True, use_container_width=True)
+        st.markdown("**Hiệu năng (pipeline_metrics, 20 mẫu gần nhất)**")
+        st.dataframe(q("SELECT ts, stage, round(events_per_sec) AS ev_s, round(batch_duration_ms) AS batch_ms, round(latency_p95_ms) AS p95_ms FROM pipeline_metrics ORDER BY ts DESC LIMIT 20"), hide_index=True, use_container_width=True)

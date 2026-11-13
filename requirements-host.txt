@@ -1,7 +1,8 @@
-# Thư viện chạy trên máy host (ngoài docker): replayer, profiling, eval
+# Thư viện chạy trên máy host (ngoài docker): Log Producer, Alert System, profiling, bảng điều khiển
 confluent-kafka==2.6.1
 pandas==2.2.3
 psycopg2-binary==2.9.10
 matplotlib==3.9.2
 streamlit==1.40.2
 sqlalchemy==2.0.36
+clickhouse-connect==0.8.11
