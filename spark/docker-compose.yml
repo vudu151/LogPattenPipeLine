@@ -11,6 +11,12 @@
 
 name: log-pattern-pipeline
 
+# Image Spark là image tự build (không có trên Docker Hub). Cả master và worker đều khai báo build,
+# để máy mới chưa có image thì compose build chứ không cố pull (lỗi "pull access denied").
+x-spark-build: &spark-build
+  context: .
+  dockerfile: Dockerfile
+
 x-app-volumes: &app-volumes
   - ./jobs:/app/jobs
   - ./registry:/app/registry
@@ -59,9 +65,7 @@ services:
       retries: 5
 
   spark-master:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: *spark-build
     image: ${SPARK_IMAGE}
     container_name: spark-master
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--host", "spark-master", "--port", "7077", "--webui-port", "8080"]
@@ -81,6 +85,7 @@ services:
         condition: service_healthy
 
   spark-worker:
+    build: *spark-build
     image: ${SPARK_IMAGE}
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077", "--webui-port", "8081"]
     deploy:
