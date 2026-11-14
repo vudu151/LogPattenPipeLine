@@ -469,7 +469,7 @@
      "editorMode": "code",
      "format": "table",
      "rawQuery": true,
-     "rawSql": "SELECT source AS nguon, reason AS ly_do, count(*) AS so_cua_so, count(*) FILTER (WHERE label = 'alert') AS co_nhan_duong_tinh FROM window_alerts GROUP BY 1,2 ORDER BY 1,2",
+     "rawSql": "SELECT source AS nguon, reason AS ly_do, count(*) AS so_cua_so, count(*) FILTER (WHERE label = 'alert') AS co_dong_chen FROM window_alerts GROUP BY 1,2 ORDER BY 1,2",
      "refId": "A"
     }
    ],

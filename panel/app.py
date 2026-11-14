@@ -164,10 +164,12 @@ tab_demo, tab_prep, tab_run, tab_res = st.tabs(["🚀 Demo nhanh", "1 · Chuẩn
 with tab_demo:
     st.subheader("Kịch bản demo trong một nút")
     st.markdown("Giả định: hạ tầng đã bật, đã warm-up và train (tab Chuẩn bị). Nút này sẽ: bật job 1, job 2 và Alert System nếu chưa chạy, rồi phát log có chèn mẫu lạ.")
-    c1, c2, c3 = st.columns(3)
-    d_skip = c1.number_input("Bỏ qua N dòng đầu (sau warm-up)", value=1109592, step=10000)
-    d_limit = c2.number_input("Phát bao nhiêu dòng", value=60000, step=10000)
-    d_rate = c3.number_input("Tốc độ (dòng/giây)", value=2000, step=500)
+    WARMUP_SKIP = {"Linux": 5113, "Mac": 23456, "Windows": 1000000}      # số dòng đã dùng cho warm-up 20%
+    c0, c1, c2, c3 = st.columns(4)
+    d_ds = c0.selectbox("Hệ điều hành", ["Linux", "Mac", "Windows"])
+    d_skip = c1.number_input("Bỏ qua N dòng đầu (sau warm-up)", value=WARMUP_SKIP[d_ds], step=1000)
+    d_limit = c2.number_input("Phát bao nhiêu dòng", value=20000, step=5000)
+    d_rate = c3.number_input("Tốc độ (dòng/giây)", value=500, step=100)
     if st.button("🚀 Bắt đầu demo", type="primary"):
         with st.status("Đang chuẩn bị demo", expanded=True) as box:
             if not job_running(1):
@@ -178,7 +180,7 @@ with tab_demo:
                 st.write("Bật Alert System…"); start_alert()
             if replay_pid():
                 stop_replay(); time.sleep(1)
-            pid = start_replay(["--dataset", "BGL", "--skip", str(int(d_skip)), "--limit", str(int(d_limit)), "--rate", str(int(d_rate)),
+            pid = start_replay(["--dataset", d_ds, "--skip", str(int(d_skip)), "--limit", str(int(d_limit)), "--rate", str(int(d_rate)),
                                 "--inject", "log_producer/inject_templates.txt", "--at", "0.5", "--inject-count", "50", "--stats-every", "5"])
             st.write(f"Log Producer đang phát (pid {pid}). Xem tab Kết quả hoặc Kafka UI.")
             box.update(label="Demo đang chạy", state="complete")
@@ -212,19 +214,21 @@ with tab_prep:
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown("**Tải dataset**")
-        ds = st.selectbox("Dataset", ["2k", "BGL", "HDFS", "OpenStack", "all"])
+        ds = st.selectbox("Dataset", ["2k", "Linux", "Mac", "Windows", "all"])
         if st.button("⬇ Tải"):
             run_and_show("download " + ds, ["download", ds], 3600)
         st.markdown("**Thống kê dataset**")
-        if st.button("📊 Profile BGL (mẫu 2k)"):
-            run_and_show("profile", ["profile", "--dataset", "BGL", "--sample"])
-        if st.button("📊 Profile BGL (đầy đủ, ~1 phút)"):
-            run_and_show("profile", ["profile", "--dataset", "BGL"])
+        p_ds = st.selectbox("Nguồn cần xem", ["Linux", "Mac", "Windows"], key="p_ds")
+        if st.button("📊 Hồ sơ nguồn (mẫu 2k)"):
+            run_and_show("profile", ["profile", "--dataset", p_ds, "--sample"])
+        if st.button("🧪 Hồ sơ chất lượng (200.000 dòng đầu)"):
+            run_and_show("quality", ["quality", "--dataset", p_ds, "--limit", "200000"])
     with c2:
         st.markdown("**Warm-up: học mẫu đã biết**")
         frac = st.slider("Tỉ lệ dòng đầu dùng để học", 0.05, 0.5, 0.2, 0.05)
-        if st.button("🧠 Warm-up BGL"):
-            run_and_show("warmup", ["warmup", "--dataset", "BGL", "--fraction", str(frac)], 1800)
+        w_ds = st.selectbox("Nguồn", ["Linux", "Mac", "Windows"], key="w_ds")
+        if st.button("🧠 Warm-up"):
+            run_and_show("warmup", ["warmup", "--dataset", w_ds, "--fraction", str(frac)], 1800)
         st.markdown("**Độ chính xác parse (Loghub-2k)**")
         if st.button("🎯 Eval parsing"):
             run_and_show("eval-parsing", ["eval-parsing"])
@@ -233,8 +237,9 @@ with tab_prep:
         win = st.selectbox("Độ dài window (giây)", [60, 300], 0)
         key = st.selectbox("Gom theo", ["ALL", "host"], 0)
         thr = st.selectbox("Ngưỡng", ["q0.95", "q0.99", "f1"], 0)
+        t_ds = st.selectbox("Nguồn", ["Linux", "Mac", "Windows"], key="t_ds")
         if st.button("🌲 Train"):
-            run_and_show("train", ["train", "--dataset", "BGL", "--key", key, "--window", str(win), "--threshold", thr], 1800)
+            run_and_show("train", ["train", "--dataset", t_ds, "--key", key, "--window", str(win), "--threshold", thr], 1800)
 
 # ---------------- tab chay ----------------
 with tab_run:
@@ -268,7 +273,7 @@ with tab_run:
         st.markdown("**Log Producer · phát log lên Kafka**  " + ("🟢 đang phát" if replay_pid() else "⚪ dừng"))
         with st.form("replay"):
             r1, r2 = st.columns(2)
-            ds = r1.selectbox("Dataset", ["BGL", "HDFS", "OpenStack"])
+            ds = r1.selectbox("Dataset", ["Linux", "Mac", "Windows"])
             sample = r2.checkbox("Dùng file mẫu 2k")
             mode = r1.radio("Nhịp phát", ["Đều (--rate dòng/giây)", "Theo timestamp gốc (--speed lần)"])
             val = r2.number_input("Giá trị", value=2000, step=100)
@@ -300,7 +305,7 @@ with tab_run:
         st.code(tail(os.path.join(LOGS, "alert_service.log"), 8), language="text")
         st.markdown("**Kafka**")
         k1, k2 = st.columns(2)
-        topic = k1.selectbox("Topic", ["raw-logs.bgl", "parsed-logs", "raw-logs.hdfs", "raw-logs.openstack", "rejected-logs", "alerts"])
+        topic = k1.selectbox("Topic", ["raw-logs.linux", "parsed-logs", "raw-logs.mac", "raw-logs.windows", "rejected-logs", "alerts"])
         if k2.button("Đếm message"):
             ok, out = sh(["count", topic]); st.code(out, language="text")
         if st.button("Xem 3 message đầu"):
@@ -310,7 +315,7 @@ with tab_run:
 with tab_res:
     st.subheader("Tìm kiếm log trong kho OLAP (ClickHouse)")
     f1, f2, f3, f4 = st.columns([1, 1, 2, 1])
-    src = f1.selectbox("Nguồn", ["tất cả", "BGL", "HDFS", "OpenStack"])
+    src = f1.selectbox("Nguồn", ["tất cả", "Windows", "Linux", "Mac"])
     stt = f2.selectbox("Trạng thái", ["tất cả", "unknown", "known"])
     kw = f3.text_input("Từ khóa trong nội dung", "")
     n = f4.slider("Số dòng", 20, 500, 100)
@@ -337,13 +342,13 @@ with tab_res:
     st.markdown("**Viết lại truy vấn theo mô tả nguồn LAV**")
     from lib_log_handler import lav
     l1, l2 = st.columns(2)
-    gran = l1.selectbox("Nhãn gán theo", ["bất kỳ", "line", "entity"])
-    ent = l2.selectbox("Thực thể", ["bất kỳ", "node", "block", "instance"])
+    fam = l1.selectbox("Họ hệ điều hành", ["bất kỳ", "unix", "windows"])
+    nat = l2.multiselect("Thuộc tính phải có sẵn trong dòng log", ["host", "pid", "level"])
     w = {}
-    if gran != "bất kỳ": w["label_granularity"] = gran
-    if ent != "bất kỳ": w["entity"] = ent
-    st.write("Nguồn trả lời được:", lav.select_sources(["event_time", "host", "label"], w) or "không có")
-    st.code(lav.rewrite(["event_time", "host", "label"], w), language="sql")
+    if fam != "bất kỳ": w["os_family"] = fam
+    if nat: w["native"] = nat
+    st.write("Nguồn trả lời được:", lav.select_sources(["event_time", "host", "pid", "content"], w) or "không có")
+    st.code(lav.rewrite(["event_time", "host", "pid", "content"], w), language="sql")
 
     st.subheader("Siêu dữ liệu trong PostgreSQL")
     if st.button("🔄 Làm mới"):
@@ -351,7 +356,7 @@ with tab_res:
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("**Cửa sổ theo nguồn và lý do**")
-        st.dataframe(q("""SELECT source, reason, count(*) AS so_cua_so, count(*) FILTER (WHERE label='alert') AS co_nhan_duong_tinh
+        st.dataframe(q("""SELECT source, reason, count(*) AS so_cua_so, count(*) FILTER (WHERE label='alert') AS co_dong_chen
                           FROM window_alerts GROUP BY 1,2 ORDER BY 1,2"""), hide_index=True, use_container_width=True)
         st.markdown("**Chất lượng dữ liệu theo luật (data_quality)**")
         st.dataframe(q("SELECT source, rule, action, sum(n) AS dong FROM data_quality GROUP BY 1,2,3 ORDER BY 1,2"), hide_index=True, use_container_width=True)

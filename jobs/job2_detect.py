@@ -5,7 +5,7 @@ Chay (tu may host):  ./pipeline.sh job2          Log: ./pipeline.sh job2-log    
 
 Moi nguon mot truy van luong rieng: job2_windows_<SRC>.
   Watermark cua Structured Streaming la toan cuc trong mot truy van. Ba nguon thuoc ba thoi ky khac nhau
-  (BGL 2005, HDFS 2008, OpenStack 2017): neu gom chung, su kien cua nguon moi nhat day watermark len va moi su kien
+  (Linux 2005, Windows 2016, Mac 2017): neu gom chung, su kien cua nguon moi nhat day watermark len va moi su kien
   cua hai nguon con lai bi coi la den tre roi bi loai. Vi vay moi nguon co truy van va watermark rieng.
 foreachBatch: features/windowing.py -> mo hinh joblib -> score, reason -> upsert PostgreSQL window_alerts,
               day cua so bat thuong vao topic `alerts` (Alert System va ClickHouse cung doc), ghi pipeline_metrics.
@@ -33,7 +33,7 @@ PG = dict(host="postgres", port=5432, user="app", password="app", dbname="logs")
 IN_SCHEMA = T.StructType([
     T.StructField("event_time", T.TimestampType()), T.StructField("ingest_time", T.TimestampType()),
     T.StructField("source", T.StringType()), T.StructField("host", T.StringType()),
-    T.StructField("level", T.StringType()), T.StructField("label", T.StringType()),
+    T.StructField("severity", T.StringType()), T.StructField("label", T.StringType()),
     T.StructField("template_id", T.StringType()), T.StructField("status", T.StringType()),
 ])
 
@@ -64,7 +64,7 @@ def main():
     ap.add_argument("--from-beginning", action="store_true")
     ap.add_argument("--trigger", default="10 seconds")
     ap.add_argument("--watermark", default="2 minutes", help="do tre toi da cua log (event time) duoc chap nhan")
-    ap.add_argument("--sources", default="BGL,HDFS,OpenStack")
+    ap.add_argument("--sources", default="Windows,Linux,Mac")
     ap.add_argument("--checkpoint", default="/app/lake/checkpoints/job2")
     args = ap.parse_args()
     trigger_ms = float(args.trigger.split()[0]) * 1000
@@ -85,21 +85,26 @@ def main():
               .select(F.from_json(F.col("value").cast("string"), IN_SCHEMA).alias("e")).select("e.*")
               .filter((F.col("source") == src) & F.col("event_time").isNotNull()))
         key_col = F.col("host") if models[src]["key"] == "host" else F.lit("ALL")
+        # dem theo (cua so, mau, trang thai, muc do) ngay trong Spark: mot cua so Windows co the chua hang tram nghin dong
         return (ev.withColumn("key", key_col).withWatermark("event_time", args.watermark)
-                .groupBy(F.window("event_time", "%d seconds" % window_s).alias("w"), "source", "key")
-                .agg(F.collect_list(F.struct("template_id", "status", "level", "label")).alias("items")))
+                .groupBy(F.window("event_time", "%d seconds" % window_s).alias("w"), "source", "key",
+                         "template_id", "status", "severity", "label")
+                .count())
 
     def window_batch(df, batch_id):
         t0 = time.time()
-        rows = df.select(F.col("w.start").alias("window_start"), F.col("w.end").alias("window_end"), "source", "key", "items").collect()
+        rows = df.select(F.col("w.start").alias("window_start"), F.col("w.end").alias("window_end"), "source", "key",
+                         "template_id", "status", "severity", "label", "count").collect()
         if not rows:
             return
-        out = []
+        groups = {}
         for r in rows:
-            items = r["items"]
+            groups.setdefault((r.window_start, r.window_end, r.source, r.key), []).append(r)
+        out = []
+        for (ws, we, source, k), items in groups.items():
             st = window_stats([i["template_id"] for i in items], [i["status"] for i in items],
-                              [i["level"] for i in items], [i["label"] for i in items])
-            st.update({"window_start": r.window_start, "window_end": r.window_end, "source": r.source, "host": r.key})
+                              [i["severity"] for i in items], [i["label"] for i in items], [i["count"] for i in items])
+            st.update({"window_start": ws, "window_end": we, "source": source, "host": k})
             out.append(st)
         W = pd.DataFrame(out)
         src = W["source"].iloc[0]; m = models[src]

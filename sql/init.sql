@@ -4,7 +4,7 @@
 -- 1. Registry template: mỗi pattern Drain3 học được, kèm trạng thái known/unknown.
 CREATE TABLE IF NOT EXISTS templates (
     template_id     TEXT PRIMARY KEY,                -- cluster id do Drain3 sinh (nhất quán qua Redis)
-    source          TEXT NOT NULL,                   -- BGL | HDFS | OpenStack
+    source          TEXT NOT NULL,                   -- Windows | Linux | Mac
     template        TEXT NOT NULL,                   -- vd: "instruction cache parity error corrected <*>"
     status          TEXT NOT NULL CHECK (status IN ('known','unknown','promoted')),
     first_seen      TIMESTAMPTZ NOT NULL,
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS window_alerts (
     window_start    TIMESTAMPTZ NOT NULL,
     window_end      TIMESTAMPTZ NOT NULL,
     source          TEXT NOT NULL,
-    host            TEXT,                            -- khóa gom: host (BGL) hoặc block_id (HDFS)
+    host            TEXT,                            -- khóa gom: tên máy, hoặc ALL (gom cả nguồn)
     n_events        INTEGER NOT NULL,
     n_unknown       INTEGER NOT NULL DEFAULT 0,
     n_error         INTEGER NOT NULL DEFAULT 0,
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS window_alerts (
     is_anomaly      BOOLEAN NOT NULL,
     reason          TEXT NOT NULL CHECK (reason IN ('normal','unknown-template','anomalous','both')),
     top_templates   JSONB,                           -- template đóng góp nhiều nhất, phục vụ giải thích trên dashboard
-    label           TEXT,                            -- nhãn ground truth của window sau khi join
+    label           TEXT,                            -- 'alert' nếu cửa sổ chứa dòng chèn thử (chỉ để đánh giá)
     detected_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (window_start, source, host)
 );

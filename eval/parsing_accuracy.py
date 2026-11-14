@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Danh gia chat luong parse tren Loghub-2k (co ground truth EventId / EventTemplate).
 
-  docker compose exec spark-master python3 /app/eval/parsing_accuracy.py --dataset BGL
+  docker compose exec spark-master python3 /app/eval/parsing_accuracy.py --dataset Linux
 
 Chi so:
   GA (Grouping Accuracy): ti le dong ma nhom du doan TRUNG KHOP HOAN TOAN voi nhom ground truth
@@ -44,11 +44,11 @@ def norm(t):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", default="BGL", choices=["BGL", "HDFS", "OpenStack"])
+    ap.add_argument("--dataset", default="Linux", choices=["Windows", "Linux", "Mac"])
     args = ap.parse_args()
     f = os.path.join(ROOT, "data", "raw", args.dataset, "%s_2k.log_structured.csv" % args.dataset)
     df = pd.read_csv(f)
-    miner = new_miner()
+    miner = new_miner(source=args.dataset)
     pred_ids, pred_tpl = [], []
     for content in df["Content"].astype(str):
         r = miner.add_log_message(content)

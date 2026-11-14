@@ -10,3 +10,4 @@ models/*.joblib
 !results/.gitkeep
 .streamlit/
 *.log
+results/archive_*/

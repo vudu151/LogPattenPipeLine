@@ -9,9 +9,9 @@ create() {  # name partitions
 }
 
 echo "[kafka-init] tao topic..."
-create raw-logs.bgl        4
-create raw-logs.hdfs       4
-create raw-logs.openstack  4
+create raw-logs.windows    4
+create raw-logs.linux      4
+create raw-logs.mac        4
 create parsed-logs         4
 create pipeline-metrics    1
 create rejected-logs       1     # dòng không đạt chất lượng (cách ly)

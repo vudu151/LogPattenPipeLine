@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Train Isolation Forest tren window cua du lieu warm-up (lake/warmup/<SRC>.parquet).
 
-  docker compose exec spark-master python3 /app/models/train_iforest.py --dataset BGL
+  docker compose exec spark-master python3 /app/models/train_iforest.py --dataset Linux
 
 - Train chi tren window "normal" (khong co dong alert).
 - Nguong anomaly chon tren toan bo window warm-up (co nhan) sao cho F1 cao nhat; in ra P/R/F1 (lac quan vi la tap train).
@@ -31,7 +31,7 @@ def prf(y, pred):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", default="BGL")
+    ap.add_argument("--dataset", default="Linux")
     ap.add_argument("--window", type=int, default=60, help="do dai window (giay)")
     ap.add_argument("--key", default="host", choices=["host", "ALL"])
     ap.add_argument("--trees", type=int, default=200)

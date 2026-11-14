@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Log Producer: nhan raw log tu cac he thong gia lap (tep Loghub) va ban len Message Queue (Kafka).
+"""Log Producer (buoc EXTRACT): doc raw log cua ba he dieu hanh (tep Loghub) va ban len Message Queue (Kafka).
 
 Phat theo dung khoang cach thoi gian goc (nhan speed factor) de mo phong log phat sinh lien tuc.
 
 Vi du:
-  python log_producer/producer.py --dataset BGL --speed 100
-  python log_producer/producer.py --dataset BGL --sample --speed 50     # file 2k dong de test nhanh
-  python log_producer/producer.py --dataset BGL --rate 2000 --limit 200000
-  python log_producer/producer.py --dataset BGL --speed 100 --inject log_producer/inject_templates.txt --at 0.5
-  python log_producer/producer.py --dataset BGL --speed 100 --late-fraction 0.05 --late-max 20   # log den tre
+  python log_producer/producer.py --dataset Linux --speed 100
+  python log_producer/producer.py --dataset Linux --sample --speed 50     # file 2k dong de test nhanh
+  python log_producer/producer.py --dataset Linux --rate 2000 --limit 200000
+  python log_producer/producer.py --dataset Linux --speed 100 --inject log_producer/inject_templates.txt --at 0.5
+  python log_producer/producer.py --dataset Linux --speed 100 --late-fraction 0.05 --late-max 20   # log den tre
 
 Message gui len topic raw-logs.<dataset> (key = host):
-  {"source": "BGL", "host": "...", "ts": "<event_time ISO UTC>", "ingest_time": "<luc gui>", "seq": 123, "raw": "<dong goc>"}
+  {"source": "Linux", "host": "...", "ts": "<event_time ISO UTC>", "ingest_time": "<luc gui>", "seq": 123, "raw": "<dong goc>"}
 """
 import argparse
 import json
@@ -22,7 +22,7 @@ import time
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from lib_log_handler import DEFAULT_FILES, SAMPLE_FILES, format_raw, parse  # noqa: E402
+from lib_log_handler import DEFAULT_FILES, SAMPLE_FILES, SOURCES, format_raw, parse  # noqa: E402
 
 try:
     from confluent_kafka import Producer
@@ -66,7 +66,7 @@ class Stats:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--dataset", required=True, choices=["BGL", "HDFS", "OpenStack"])
+    ap.add_argument("--dataset", required=True, choices=SOURCES)
     ap.add_argument("--file", help="duong dan file log; mac dinh data/raw/<DATASET>/...")
     ap.add_argument("--sample", action="store_true", help="dung file 2k dong (test nhanh)")
     ap.add_argument("--bootstrap", default=os.environ.get("KAFKA_BOOTSTRAP", "localhost:29092"))
@@ -152,8 +152,8 @@ def main():
             if not line:
                 continue
             rec = parse(args.dataset, line)
-            if rec is None:
-                st.parse_fail += 1
+            if rec is None or not rec["event_time"]:    # dong khong tach duoc: van gui di, job 1 se cach ly
+                st.parse_fail += 1; rec = None
                 ev = last_ev; host = "unparsed"
             else:
                 ev = parse_iso(rec["event_time"]); host = rec["host"]
@@ -189,7 +189,7 @@ def main():
             if inject_lines and not injected_done and n_orig >= inject_after:
                 for k in range(args.inject_count):
                     content = inject_lines[k % len(inject_lines)].replace("retry 3", "retry {}".format(k))
-                    raw = format_raw(args.dataset, ev, host, content, level="FATAL")
+                    raw = format_raw(args.dataset, ev, host, content)
                     send({"source": args.dataset, "host": host, "ts": rec["event_time"] if rec else ev.isoformat(),
                           "ingest_time": now_iso(), "seq": seq, "raw": raw, "injected": True})
                     seq += 1; st.injected += 1

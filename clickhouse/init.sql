@@ -1,6 +1,10 @@
--- Kho OLAP cho log da chuan hoa (ClickHouse) va STORAGE WRITER.
--- Storage Writer = bang engine Kafka + materialized view: ClickHouse tu doc topic va ghi vao bang MergeTree,
+-- Kho du lieu (data warehouse) cho log da chuan hoa tren ClickHouse, va buoc LOAD cua he thong.
+-- Load = Storage Writer = bang engine Kafka + materialized view: ClickHouse tu doc topic va ghi vao bang MergeTree,
 -- khong can tien trinh rieng. Moi topic mot cap (hang doi Kafka, view ghi).
+--   log_events          bang su kien chi tiet theo luoc do trung gian LogEvent
+--   events_per_minute   bang tong hop theo phut (tu dong cap nhat khi log_events nhan dong moi)
+--   rejected_logs       dong bi tang chat luong cach ly, kem ly do
+--   alerts              canh bao
 
 CREATE DATABASE IF NOT EXISTS logs;
 
@@ -15,6 +19,7 @@ CREATE TABLE IF NOT EXISTS logs.log_events
     level           LowCardinality(String),
     severity        LowCardinality(String),
     component       String,
+    pid             Nullable(Int32),              -- null: nguon khong ghi ma tien trinh
     content         String,
     template_id     String,
     template        String,
@@ -34,7 +39,7 @@ ORDER BY (source, event_time, host);
 CREATE TABLE IF NOT EXISTS logs.kafka_parsed_logs
 (
     event_time String, ingest_time String, processed_time String, source String, host String, level String,
-    component String, content String, raw String, label String, template_id String, template String, status String,
+    component String, pid Nullable(Int32), content String, raw String, label String, template_id String, template String, status String,
     injected Bool, seq Int64, severity String, quality_flags String, action String
 )
 ENGINE = Kafka
@@ -45,9 +50,24 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS logs.mv_log_events TO logs.log_events AS
 SELECT parseDateTime64BestEffortOrZero(event_time, 3, 'UTC')     AS event_time,
        parseDateTime64BestEffortOrZero(ingest_time, 3, 'UTC')    AS ingest_time,
        parseDateTime64BestEffortOrZero(processed_time, 3, 'UTC') AS processed_time,
-       source, host, level, severity, component, content, template_id, template, status, label, quality_flags,
+       source, host, level, severity, component, pid, content, template_id, template, status, label, quality_flags,
        toUInt8(injected) AS injected, seq, raw
 FROM logs.kafka_parsed_logs;
+
+-- ============ 1b. Bang tong hop theo phut: so dong theo nguon, muc do, trang thai ============
+CREATE TABLE IF NOT EXISTS logs.events_per_minute
+(
+    minute    DateTime('UTC'),
+    source    LowCardinality(String),
+    severity  LowCardinality(String),
+    status    LowCardinality(String),
+    events    UInt64
+)
+ENGINE = SummingMergeTree ORDER BY (source, minute, severity, status);
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS logs.mv_events_per_minute TO logs.events_per_minute AS
+SELECT toStartOfMinute(event_time) AS minute, source, severity, status, count() AS events
+FROM logs.log_events GROUP BY minute, source, severity, status;
 
 -- ============ 2. Dong bi cach ly boi tang chat luong ============
 CREATE TABLE IF NOT EXISTS logs.rejected_logs

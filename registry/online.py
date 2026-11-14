@@ -22,10 +22,10 @@ PROMOTED_REFRESH_S = 30
 class SourceClassifier:
     def __init__(self, source):
         self.source = source
-        self.base = new_miner(RedisPersistence(REDIS_HOST, REDIS_PORT, 0, None, False, key("snapshot", source)))
+        self.base = new_miner(RedisPersistence(REDIS_HOST, REDIS_PORT, 0, None, False, key("snapshot", source)), source)
         self.base.persistence_handler = None            # dong bang: khong bao gio ghi nguoc snapshot
         self.has_warmup = len(self.base.drain.clusters) > 0
-        self.novel = new_miner()
+        self.novel = new_miner(source=source)
         self.novel_ids = {}                             # cluster_id cua cay novel -> template_id co dinh
         self.promoted = set(); self.promoted_at = 0.0
         self.r = redis_client()

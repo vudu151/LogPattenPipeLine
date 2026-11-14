@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Warm-up: hoc cay Drain tu phan dau dataset de xay tap template KNOWN.
+"""Warm-up: hoc cay Drain tu phan dau cua log tung he dieu hanh de xay tap mau KNOWN.
 
 Chay trong container Spark (cung ban drain3 voi job 1):
-  docker compose exec spark-master python3 /app/registry/warmup.py --dataset BGL --fraction 0.2
+  docker compose exec spark-master python3 /app/registry/warmup.py --dataset Linux --fraction 0.5
 
-Mac dinh chi hoc tu dong NORMAL (--normal-only) de template cua su co chua tung thay se la "unknown"
-khi streaming. Ket qua:
+Log he dieu hanh khong co nhan: phan dau cua log duoc coi la lich su da biet, mau nao xuat hien sau do la "unknown".
+Dong bi normalizer cach ly khong duoc hoc. Ket qua:
   - Redis: snapshot cay Drain, SET known:<SRC>, warmup:<SRC>:lines
   - PostgreSQL: bang templates (status=known, from_warmup=true)
   - lake/warmup/<SRC>.parquet: log warm-up da gan template (dung de train Isolation Forest o buoc 4)
@@ -20,7 +20,7 @@ import pandas as pd  # noqa: E402
 import psycopg2  # noqa: E402
 from drain3.redis_persistence import RedisPersistence  # noqa: E402
 
-from lib_log_handler import WARMUP_FILES, handle  # noqa: E402
+from lib_log_handler import SOURCES, WARMUP_FILES, handle  # noqa: E402
 from registry.common import REDIS_HOST, REDIS_PORT, key, new_miner, redis_client, template_id  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
@@ -37,23 +37,21 @@ def count_lines(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", default="BGL", choices=["BGL", "HDFS", "OpenStack"])
+    ap.add_argument("--dataset", default="Linux", choices=SOURCES)
     ap.add_argument("--file")
     ap.add_argument("--fraction", type=float, default=0.2, help="ti le dong dau dung cho warm-up")
     ap.add_argument("--lines", type=int, help="so dong warm-up (ghi de --fraction)")
     ap.add_argument("--skip-value", type=int, help="gia tri --skip ghi vao Redis (mac dinh = so dong warm-up; dat 0 khi tep phat lai khac tep warm-up)")
-    ap.add_argument("--all-lines", dest="normal_only", action="store_false", help="hoc ca dong co nhan alert")
-    ap.set_defaults(normal_only=True)
     args = ap.parse_args()
     src = args.dataset
     path = args.file or os.path.join(ROOT, "data", "raw", WARMUP_FILES[src])
     n_lines = args.lines or int(count_lines(path) * args.fraction)
-    print("[warmup] %s: hoc %d dong dau cua %s (normal_only=%s)" % (src, n_lines, path, args.normal_only), flush=True)
+    print("[warmup] %s: hoc %d dong dau cua %s" % (src, n_lines, path), flush=True)
 
     redis_client().delete(key("snapshot", src))      # bat dau tu cay rong
-    miner = new_miner(RedisPersistence(REDIS_HOST, REDIS_PORT, 0, None, False, key("snapshot", src)))
+    miner = new_miner(RedisPersistence(REDIS_HOST, REDIS_PORT, 0, None, False, key("snapshot", src)), src)
     t0 = time.time()
-    rows = []; learned = skipped = rejected = 0
+    learned = rejected = 0
     with open(path, encoding="utf-8", errors="replace") as f:
         for i, line in enumerate(f):
             if i >= n_lines:
@@ -62,13 +60,7 @@ def main():
             if action == "reject":                      # dong khong dat chat luong: khong hoc, khong ghi
                 rejected += 1
                 continue
-            is_alert = rec["label"] not in (None, "normal")
-            if args.normal_only and is_alert:
-                skipped += 1
-                rows.append((rec["event_time"], rec["host"], rec["level"], rec["label"], rec["content"], None))
-                continue
             miner.add_log_message(rec["content"]); learned += 1
-            rows.append((rec["event_time"], rec["host"], rec["level"], rec["label"], rec["content"], None))
             if learned % 200000 == 0:
                 print("[warmup] da hoc %d dong, %d cluster, %.0fs" % (learned, len(miner.drain.clusters), time.time() - t0), flush=True)
 
@@ -77,8 +69,8 @@ def main():
     for c in clusters:
         tpl = c.get_template()
         known[template_id(src, tpl, "K")] = (tpl, c.size)
-    print("[warmup] xong hoc: %d dong normal, bo qua %d dong alert, cach ly %d dong loi chat luong, %d template known, %.0fs" % (
-        learned, skipped, rejected, len(known), time.time() - t0), flush=True)
+    print("[warmup] xong hoc: %d dong, cach ly %d dong loi chat luong, %d mau known, %.0fs" % (
+        learned, rejected, len(known), time.time() - t0), flush=True)
 
     # --- luu Redis ---
     miner.save_state("warmup")
@@ -88,21 +80,31 @@ def main():
         r.sadd(key("known", src), *known.keys())
     r.set(key("lines", src), n_lines if args.skip_value is None else args.skip_value)
 
-    # --- gan template cho toan bo dong warm-up (ca dong alert) va ghi Parquet ---
+    # --- gan mau cho toan bo dong warm-up va ghi Parquet (du lieu huan luyen Isolation Forest) ---
+    # Doc lai tep lan hai thay vi giu noi dung trong bo nho (1 trieu dong Windows chiem hon 1 GB).
     d = miner.drain
-    out = []
-    for et, host, lvl, label, content, _ in rows:
-        c = d.tree_search(d.root_node, d.get_content_as_tokens(miner.masker.mask(content)), d.sim_th, False)
-        if c is not None:
-            tpl = c.get_template(); out.append((et, host, lvl, label, template_id(src, tpl, "K"), "known"))
-        else:
-            out.append((et, host, lvl, label, None, "unknown"))
-    df = pd.DataFrame(out, columns=["event_time", "host", "level", "label", "template_id", "status"])
+    out = []; tid_of = {}
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for i, line in enumerate(f):
+            if i >= n_lines:
+                break
+            action, _flags, rec = handle(src, line)
+            if action == "reject":
+                continue
+            c = d.tree_search(d.root_node, d.get_content_as_tokens(miner.masker.mask(rec["content"])), d.sim_th, False)
+            if c is not None:
+                tid = tid_of.get(c.cluster_id)
+                if tid is None:
+                    tid = tid_of[c.cluster_id] = template_id(src, c.get_template(), "K")
+                out.append((rec["event_time"], rec["host"], rec["severity"], None, tid, "known"))
+            else:
+                out.append((rec["event_time"], rec["host"], rec["severity"], None, None, "unknown"))
+    df = pd.DataFrame(out, columns=["event_time", "host", "severity", "label", "template_id", "status"])
     df["event_time"] = pd.to_datetime(df["event_time"], utc=True, format="ISO8601")
     os.makedirs(os.path.join(ROOT, "lake", "warmup"), exist_ok=True)
     pq = os.path.join(ROOT, "lake", "warmup", "%s.parquet" % src)
     df.to_parquet(pq, index=False)
-    print("[warmup] ghi %s (%d dong, %d dong alert khong khop known)" % (
+    print("[warmup] ghi %s (%d dong, %d dong khong khop mau cuoi cung)" % (
         pq, len(df), int(((df.status == "unknown")).sum())), flush=True)
 
     # --- PostgreSQL ---

@@ -1,4 +1,4 @@
-"""Spark job 1 (Stream Processor, phan chuan hoa): raw-logs.* -> lib-log-handler (GAV + normalizer) -> Drain3 known/unknown
+"""Spark job 1 (buoc TRANSFORM): raw-logs.* -> lib-log-handler (khung nhin GAV + normalizer) -> Drain3 known/unknown
 -> parsed-logs (Storage Writer cua ClickHouse doc tiep) + rejected-logs + alerts + Parquet + PostgreSQL.
 
 Chay (tu may host):  ./pipeline.sh job1            (them --from-beginning de doc lai tu dau topic)
@@ -27,7 +27,8 @@ OUT_SCHEMA = T.StructType([
     T.StructField("event_time", T.TimestampType()), T.StructField("ingest_time", T.TimestampType()),
     T.StructField("processed_time", T.TimestampType()), T.StructField("source", T.StringType()),
     T.StructField("host", T.StringType()), T.StructField("level", T.StringType()),
-    T.StructField("component", T.StringType()), T.StructField("content", T.StringType()),
+    T.StructField("component", T.StringType()), T.StructField("pid", T.IntegerType()),
+    T.StructField("content", T.StringType()),
     T.StructField("raw", T.StringType()), T.StructField("label", T.StringType()),
     T.StructField("template_id", T.StringType()), T.StructField("template", T.StringType()),
     T.StructField("status", T.StringType()), T.StructField("injected", T.BooleanType()),
@@ -38,7 +39,7 @@ OUT_SCHEMA = T.StructType([
 
 
 def parse_partition(batches):
-    """Chay tren executor. Moi dong: wrapper -> ghep nhan -> kiem tra chat luong -> (neu dat) Drain."""
+    """Chay tren executor. Moi dong: khung nhin GAV -> kiem tra chat luong -> (neu dat) Drain."""
     import pandas as pd
     from lib_log_handler import handle
     from registry import online
@@ -50,26 +51,27 @@ def parse_partition(batches):
                 m = json.loads(v)
             except ValueError:
                 continue
-            src = m.get("source", "BGL"); raw = m.get("raw", "")
+            src = m.get("source"); raw = m.get("raw", "")
             action, flags, rec = handle(src, raw)
             if rec is None:
-                rec = {"event_time": m.get("ts"), "host": m.get("host"), "level": None, "component": None,
-                       "content": raw, "label": None, "severity": None}
+                rec = {"event_time": m.get("ts"), "host": m.get("host"), "level": None, "component": None, "pid": None,
+                       "content": raw, "severity": None}
             k = (src, raw)
-            if k in seen:                                 # trung hoan toan trong cung lo, cung partition (key = host)
-                flags = flags + ["duplicate"]; action = "reject"
+            if k in seen and action != "reject":   # trung hoan toan trong cung lo: chi gan co, vi thoi gian chi chinh xac den giay
+                flags = flags + ["repeated"]
             seen.add(k)
+            injected = bool(m.get("injected", False))
             if action == "reject":
                 tid, tpl, status = None, None, "rejected"
             else:
                 tid, tpl, status = online.get(src).classify(rec["content"])
             out.append((rec["event_time"], m.get("ingest_time"), pd.Timestamp.utcnow(), src, rec["host"], rec["level"],
-                        rec["component"], rec["content"], raw, rec["label"], tid, tpl, status,
-                        bool(m.get("injected", False)), m.get("seq"), rec.get("severity"), ",".join(flags), action))
+                        rec["component"], rec["pid"], rec["content"], raw, "inject" if injected else None, tid, tpl, status,
+                        injected, m.get("seq"), rec.get("severity"), ",".join(flags), action))
         df = pd.DataFrame(out, columns=OUT_SCHEMA.fieldNames())
         for c in ("event_time", "ingest_time", "processed_time"):
             df[c] = pd.to_datetime(df[c], utc=True, errors="coerce", format="ISO8601")
-        df["seq"] = df["seq"].astype("Int64")
+        df["seq"] = df["seq"].astype("Int64"); df["pid"] = df["pid"].astype("Int32")
         yield df
 
 

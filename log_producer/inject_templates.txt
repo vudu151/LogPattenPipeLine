@@ -1,7 +1,7 @@
-# Moi dong la mot content chua tung co trong BGL, dung de kiem tra phat hien unknown pattern.
-# Dong bat dau bang # bi bo qua. Tham so so se duoc Drain3 mask thanh <*>.
-quantum flux capacitor desync detected on core 7 retry 3
-thermal envelope breach sensor 12 reading 91.5C threshold 85.0C
-unexpected firmware checksum mismatch node 0x3F expected 0xA1B2 got 0xC3D4
-memory scrubber found 4 uncorrectable errors in bank 2
-network fabric link 3 flapping 17 times in 60 seconds
+# Moi dong la mot noi dung chua tung co trong log cua ba he dieu hanh, dung de kiem tra phat hien mau chua biet.
+# Dong bat dau bang # bi bo qua. Tham so so se duoc Drain3 thay bang <*>.
+ransomware guard blocked mass file rename on volume 3 retry 3
+kernel integrity monitor found 4 hooked syscalls in table 2
+disk controller 7 reported thermal trip at 91.5C threshold 85.0C
+bootloader checksum mismatch slot 0x3F expected 0xA1B2 got 0xC3D4
+credential vault unsealed by unsigned process 4711 from session 17

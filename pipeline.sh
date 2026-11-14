@@ -19,15 +19,15 @@ case "${1:-help}" in
   download) .venv/bin/python tools/download_datasets.py "${2:-2k}" ;;
   profile)  .venv/bin/python profiling/profile.py "${@:2}" ;;
   produce|replay) .venv/bin/python log_producer/producer.py "${@:2}" ;;   # Log Producer (replay = ten cu)
-  consume)  # xem N message dau cua topic: ./pipeline.sh consume raw-logs.bgl 5
+  consume)  # xem N message dau cua topic: ./pipeline.sh consume raw-logs.linux 5
             docker compose exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
-              --topic "${2:-raw-logs.bgl}" --from-beginning --max-messages "${3:-5}" --timeout-ms 10000 ;;
-  count)    # dem message trong topic: ./pipeline.sh count raw-logs.bgl
+              --topic "${2:-raw-logs.linux}" --from-beginning --max-messages "${3:-5}" --timeout-ms 10000 ;;
+  count)    # dem message trong topic: ./pipeline.sh count raw-logs.linux
             docker compose exec -T kafka /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 \
-              --topic "${2:-raw-logs.bgl}" | awk -F: '{s+=$3} END {print "total messages:", s+0}' ;;
-  warmup)   # hoc template known: ./pipeline.sh warmup --dataset BGL --fraction 0.2
+              --topic "${2:-raw-logs.linux}" | awk -F: '{s+=$3} END {print "total messages:", s+0}' ;;
+  warmup)   # hoc template known: ./pipeline.sh warmup --dataset Linux --fraction 0.5
             docker compose exec -T -e PYTHONPATH=/app spark-master python3 /app/registry/warmup.py "${@:2}" ;;
-  eval-parsing)  for ds in ${2:-BGL HDFS OpenStack}; do
+  eval-parsing)  for ds in ${2:-Windows Linux Mac}; do
               docker compose exec -T -e PYTHONPATH=/app spark-master python3 /app/eval/parsing_accuracy.py --dataset "$ds"; echo; done ;;
   job1)     # chay Spark job 1 o nen; log tai lake/logs/job1.log
             docker compose exec -d spark-master bash -c "cd /app && /opt/spark/bin/spark-submit \
@@ -39,7 +39,7 @@ case "${1:-help}" in
   job1-stop) docker compose exec -T spark-master pkill -f job1_parse.py && echo "da dung job1" || echo "job1 khong chay" ;;
   job1-reset) # xoa checkpoint de doc lai tu dau
             docker compose exec -T spark-master rm -rf /app/lake/checkpoints/job1 && echo "da xoa checkpoint job1" ;;
-  train)    # train Isolation Forest tren window warm-up: ./pipeline.sh train --dataset BGL [--window 60 --key ALL]
+  train)    # train Isolation Forest tren window warm-up: ./pipeline.sh train --dataset Linux [--window 60 --key ALL]
             docker compose exec -T -e PYTHONPATH=/app spark-master python3 /app/models/train_iforest.py "${@:2}" ;;
   job2)     docker compose exec -d spark-master bash -c "cd /app && /opt/spark/bin/spark-submit \
               --master spark://spark-master:7077 --total-executor-cores 2 --executor-memory 900m \
@@ -51,15 +51,17 @@ case "${1:-help}" in
   job2-reset) docker compose exec -T spark-master rm -rf /app/lake/checkpoints/job2 && echo "da xoa checkpoint job2" ;;
   panel)    # bang dieu khien web: http://localhost:8501
             PIPELINE_DIR="$(pwd)" .venv/bin/streamlit run panel/app.py --server.port 8501 --server.headless true --browser.gatherUsageStats false "${@:2}" ;;
-  quality)  # ho so chat luong du lieu: ./pipeline.sh quality --dataset BGL
+  quality)  # ho so chat luong du lieu: ./pipeline.sh quality --dataset Linux
             .venv/bin/python profiling/quality.py "${@:2}" ;;
-  eval-detect) # danh gia phat hien ngoai tuyen: ./pipeline.sh eval-detect --dataset BGL --lines 1000000
+  eval-detect) # danh gia phat hien bang dong chen: ./pipeline.sh eval-detect --dataset Linux
             docker compose exec -T -e PYTHONPATH=/app spark-master python3 /app/eval/detection_metrics.py "${@:2}" ;;
+  eval-novelty) # ti le dong unknown theo do dai warm-up: ./pipeline.sh eval-novelty --dataset Linux
+            docker compose exec -T -e PYTHONPATH=/app spark-master python3 /app/eval/novelty_curve.py "${@:2}" ;;
   alerts)   # Alert System: doc topic alerts, khu lap, in ra man hinh / ghi tep / webhook
             .venv/bin/python alerting/alert_service.py "${@:2}" ;;
   ch)       # truy van ClickHouse: ./pipeline.sh ch "SELECT count() FROM logs.log_events"
             docker compose exec -T clickhouse clickhouse-client --user app --password app -q "${2:-SELECT source, count() FROM logs.log_events GROUP BY source}" ;;
-  gav)      .venv/bin/python lib_log_handler/gav.py ;;      # in dinh nghia khung nhin GAV
+  gav)      .venv/bin/python -m lib_log_handler.gav 2>/dev/null ;;      # in dinh nghia khung nhin GAV
   lav)      .venv/bin/python -m lib_log_handler.lav 2>/dev/null ;;   # mo ta nguon LAV va vi du chon nguon
   check)
     echo "== containers";      docker compose ps --format 'table {{.Name}}\t{{.Status}}'
@@ -80,7 +82,7 @@ Hạ tầng
   topics | psql | ch "SQL"   liệt kê topic Kafka, mở PostgreSQL, truy vấn ClickHouse
 
 Dữ liệu
-  download [2k|BGL|HDFS|OpenStack|all]   tải dữ liệu Loghub
+  download [2k|Windows|Linux|Mac|all]   tải dữ liệu Loghub
   profile --dataset X                    hồ sơ nguồn
   quality --dataset X                    hồ sơ chất lượng theo từng luật
   gav | lav                              in khung nhìn GAV / mô tả nguồn LAV
@@ -99,7 +101,8 @@ Chạy luồng
 
 Đánh giá
   eval-parsing [X]                       độ chính xác trích mẫu trên Loghub-2k
-  eval-detect --dataset X [--lines N]    precision / recall phát hiện
+  eval-novelty --dataset X               tỉ lệ dòng unknown theo độ dài warm-up
+  eval-detect --dataset X [--lines N]    phát hiện mẫu lạ bằng dòng chèn thử
 HELP
     ;;
 esac
