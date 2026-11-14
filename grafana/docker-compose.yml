@@ -1,0 +1,32 @@
+# Package grafana: dashboard "Log Pattern Pipeline".
+# Nguồn dữ liệu (provisioning/datasources): ClickHouse (package clickhouse) và PostgreSQL (package spark), qua mạng log_network.
+# Chạy riêng package này:  docker network create log_network ; docker compose up -d
+
+name: log-pattern-pipeline
+
+services:
+  grafana:
+    image: ${GRAFANA_IMAGE}
+    container_name: grafana
+    ports:
+      - "${GRAFANA_PORT}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_INSTALL_PLUGINS: ${GRAFANA_PLUGINS}
+    volumes:
+      - ./provisioning:/etc/grafana/provisioning:ro
+      - ./dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    networks: [log_network]
+
+volumes:
+  grafana-data:
+
+networks:
+  log_network:
+    name: log_network
+    external: true        # mạng dùng chung của cả năm package; tạo bằng: docker network create log_network

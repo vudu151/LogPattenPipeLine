@@ -1,0 +1,122 @@
+# Package spark (bước TRANSFORM): Spark master + worker chạy job 1 (GAV, chất lượng, Drain3) và job 2 (chấm điểm cửa sổ),
+# cùng hai kho phụ trợ của các job: Redis (cây mẫu Drain dùng chung) và PostgreSQL (siêu dữ liệu).
+# MinIO (data lake) nằm trong profile "lake": docker compose --profile lake up -d
+# Chạy riêng package này:  docker network create log_network ; docker compose up -d --build
+#
+# Mã nguồn được gắn vào /app theo đúng bố cục mà các job đang dùng:
+#   /app/jobs, /app/registry, /app/eval   <- package spark
+#   /app/lib_log_handler                  <- thư viện dùng chung ở gốc repo
+#   /app/features, /app/models            <- package ML (job 2 cần vector đặc trưng và mô hình đã huấn luyện)
+#   /app/data, /app/lake, /app/results    <- dữ liệu và kết quả ở gốc repo
+
+name: log-pattern-pipeline
+
+x-app-volumes: &app-volumes
+  - ./jobs:/app/jobs
+  - ./registry:/app/registry
+  - ./eval:/app/eval
+  - ../lib_log_handler:/app/lib_log_handler
+  - ../ML/features:/app/features
+  - ../ML/models:/app/models
+  - ../data:/app/data
+  - ../lake:/app/lake
+  - ../results:/app/results
+  - spark-checkpoints:/checkpoints
+
+services:
+  redis:
+    image: ${REDIS_IMAGE}
+    container_name: redis
+    ports:
+      - "${REDIS_PORT}:6379"
+    command: ["redis-server", "--appendonly", "yes"]   # giữ cây template Drain3 khi restart
+    volumes:
+      - redis-data:/data
+    networks: [log_network]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: ${POSTGRES_IMAGE}
+    container_name: postgres
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks: [log_network]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  spark-master:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${SPARK_IMAGE}
+    container_name: spark-master
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--host", "spark-master", "--port", "7077", "--webui-port", "8080"]
+    ports:
+      - "${SPARK_MASTER_UI_PORT}:8080"           # Spark master UI
+      - "${SPARK_MASTER_PORT}:7077"
+      - "${SPARK_JOB1_UI_PORT}:4040"           # UI job 1 (spark-submit từ master)
+      - "${SPARK_JOB2_UI_PORT}:4041"           # UI job 2
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+    volumes: *app-volumes
+    networks: [log_network]
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  spark-worker:
+    image: ${SPARK_IMAGE}
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077", "--webui-port", "8081"]
+    deploy:
+      replicas: ${SPARK_WORKER_REPLICAS}
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY}
+    volumes: *app-volumes
+    networks: [log_network]
+    depends_on:
+      - spark-master
+
+  # Tùy chọn (profile lake): nơi ghi Parquet raw/parsed.
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: minio
+    profiles: ["lake"]
+    command: ["server", "/data", "--console-address", ":9001"]
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio12345
+    volumes:
+      - minio-data:/data
+    networks: [log_network]
+
+volumes:
+  redis-data:
+  postgres-data:
+  spark-checkpoints:
+  minio-data:
+
+networks:
+  log_network:
+    name: log_network
+    external: true        # mạng dùng chung của cả năm package; tạo bằng: docker network create log_network

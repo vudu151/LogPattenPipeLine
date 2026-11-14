@@ -1,0 +1,37 @@
+# Package ML: mô hình phát hiện bất thường (Isolation Forest trên vector đặc trưng theo cửa sổ).
+#   features/   tạo vector đặc trưng        models/   huấn luyện, nơi lưu mô hình .joblib
+#   eval/       đánh giá phát hiện bằng dòng chèn thử
+# Container `ml` chỉ dùng để huấn luyện và đánh giá:  ./pipeline.sh train ... ; ./pipeline.sh eval-detect ...
+# Việc chấm điểm trên luồng do Spark job 2 (package spark) làm, dùng features/ và models/ của package này.
+# Chạy riêng package này:  docker network create log_network ; docker compose up -d --build
+
+name: log-pattern-pipeline
+
+services:
+  ml:
+    build:
+      context: ../spark
+      dockerfile: Dockerfile
+    image: ${ML_IMAGE}
+    container_name: ml
+    command: ["sleep", "infinity"]
+    environment:
+      PYTHONPATH: /app
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+    volumes:
+      - ./features:/app/features
+      - ./models:/app/models
+      - ./eval:/app/eval
+      - ../lib_log_handler:/app/lib_log_handler
+      - ../spark/registry:/app/registry            # cây mẫu Drain: đánh giá cần tra mẫu known
+      - ../log_producer:/app/log_producer:ro       # inject_templates.txt: các mẫu chèn thử
+      - ../data:/app/data
+      - ../lake:/app/lake
+      - ../results:/app/results
+    networks: [log_network]
+
+networks:
+  log_network:
+    name: log_network
+    external: true        # mạng dùng chung của cả năm package; tạo bằng: docker network create log_network

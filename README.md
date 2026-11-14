@@ -62,16 +62,39 @@ Tệp log 3 HĐH ─► Log Producer ─► Kafka raw-logs.* ─► Spark job 1 
 
 | Thành phần | Nằm ở | Làm gì |
 |---|---|---|
-| Công cụ tải dữ liệu | `tools/download_datasets.py` | Tải log Windows (5 triệu dòng đầu), Linux, Mac và mẫu Loghub-2k |
+| Công cụ tải dữ liệu | `log_producer/download_datasets.py` | Tải log Windows (5 triệu dòng đầu), Linux, Mac và mẫu Loghub-2k |
 | Log Producer | `log_producer/producer.py` | Phát log thô lên Kafka theo nhịp thời gian gốc; có thể chèn mẫu lạ, giả log đến trễ |
 | **lib-log-handler** | `lib_log_handler/` | Sổ đăng ký nguồn, lược đồ `LogEvent`, ánh xạ GAV, mô tả nguồn LAV, 8 luật chất lượng |
-| Message Queue | Kafka | Topic `raw-logs.*`, `parsed-logs`, `rejected-logs`, `alerts` |
-| Stream Processor | `jobs/job1_parse.py`, `jobs/job2_detect.py` | Job 1: chuẩn hóa, trích mẫu, gắn known/unknown. Job 2: chấm điểm từng phút |
-| Mô hình ML | `models/`, `features/` | Isolation Forest có sẵn, chỉ dùng để kiểm tra |
+| Message Queue | Kafka (`log_producer/docker-compose.yml`) | Topic `raw-logs.*`, `parsed-logs`, `rejected-logs`, `alerts` |
+| Stream Processor | `spark/jobs/job1_parse.py`, `spark/jobs/job2_detect.py` | Job 1: chuẩn hóa, trích mẫu, gắn known/unknown. Job 2: chấm điểm từng phút |
+| Mô hình ML | `ML/models/`, `ML/features/` | Isolation Forest có sẵn, chỉ dùng để kiểm tra |
 | Storage Writer + kho dữ liệu | `clickhouse/init.sql` | ClickHouse tự đọc topic và ghi vào `logs.log_events`; bảng tổng hợp `events_per_minute` |
 | Alert System | `alerting/alert_service.py` | Đọc topic `alerts`, gộp cảnh báo trùng, in màn hình / ghi tệp / gửi webhook |
 | Dashboard | `grafana/`, `panel/app.py` | Grafana; bảng điều khiển Streamlit để demo và tìm kiếm log |
-| Siêu dữ liệu | PostgreSQL, Redis | Sổ mẫu, cửa sổ đã chấm điểm, thống kê; Redis giữ cây mẫu Drain dùng chung |
+| Siêu dữ liệu | PostgreSQL, Redis (`spark/docker-compose.yml`) | Sổ mẫu, cửa sổ đã chấm điểm, thống kê; Redis giữ cây mẫu Drain dùng chung |
+
+## Cấu trúc thư mục
+
+Mã nguồn chia thành năm package. Mỗi package có `docker-compose.yml` và `.env` riêng, và mọi container đều nối vào chung một mạng Docker tên `log_network`.
+
+| Package | Bước | Chứa gì | Dịch vụ Docker |
+|---|---|---|---|
+| `log_producer/` | Extract | `producer.py`, `download_datasets.py`, `inject_templates.txt`, `create-topics.sh` | `kafka`, `kafka-init`, `kafka-ui` |
+| `spark/` | Transform | `jobs/` (job 1, job 2), `registry/` (Drain, warm-up), `eval/` (đánh giá trích mẫu), `sql/init.sql`, `Dockerfile` | `spark-master`, `spark-worker`, `redis`, `postgres` |
+| `clickhouse/` | Load | `init.sql` (bảng và Storage Writer) | `clickhouse` |
+| `ML/` | Phát hiện | `features/`, `models/` (huấn luyện, tệp mô hình), `eval/` (đánh giá phát hiện) | `ml` |
+| `grafana/` | Dashboard | `provisioning/`, `dashboards/` | `grafana` |
+
+Nằm ở gốc repo vì dùng chung cho nhiều package: `lib_log_handler/` (thư viện GAV, luật chất lượng), `alerting/`, `panel/`, `profiling/`, `schemas/`, `pipeline.sh`, và `docker-compose.yml` gốc (gộp năm tệp compose bằng `include`).
+
+```bash
+# Chạy cả hệ thống (tự tạo mạng log_network):
+./pipeline.sh up
+
+# Hoặc chạy riêng một package:
+docker network create log_network        # một lần
+cd clickhouse && docker compose up -d
+```
 
 ## Yêu cầu
 

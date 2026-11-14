@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Mọi lệnh của dự án ở một chỗ. Dùng: ./pipeline.sh <lệnh>   (xem danh sách: ./pipeline.sh help)
+# Mã nguồn chia theo package: log_producer/ (Extract), spark/ (Transform), clickhouse/ (Load), ML/, grafana/.
+# Tệp docker-compose.yml ở gốc gộp compose của năm package, nên các lệnh `docker compose` dưới đây chạy từ gốc repo.
 set -e
 cd "$(dirname "$0")"
 KT="docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092"
@@ -7,7 +9,9 @@ PSQL="docker compose exec -T postgres psql -U app -d logs"
 
 case "${1:-help}" in
   build)  docker compose build spark-master ;;
-  up)     mkdir -p lake/logs lake/warmup results models && chmod 777 lake lake/logs lake/warmup results models 2>/dev/null || true
+  up)     mkdir -p lake/logs lake/warmup results ML/models && chmod 777 lake lake/logs lake/warmup results ML/models 2>/dev/null || true
+          docker network inspect log_network >/dev/null 2>&1 || docker network create log_network   # mang dung chung cua 5 package
+          docker compose up -d --build --wait kafka      # Kafka truoc, de cac package khac thay topic
           docker compose up -d --build ;;
   lake)   docker compose --profile lake up -d ;;
   down)   docker compose down ;;
@@ -16,7 +20,7 @@ case "${1:-help}" in
   logs)   docker compose logs -f --tail=50 "${@:2}" ;;
   topics) $KT --list ;;
   psql)   docker compose exec postgres psql -U app -d logs ;;
-  download) .venv/bin/python tools/download_datasets.py "${2:-2k}" ;;
+  download) .venv/bin/python log_producer/download_datasets.py "${2:-2k}" ;;
   profile)  .venv/bin/python profiling/profile.py "${@:2}" ;;
   produce|replay) .venv/bin/python log_producer/producer.py "${@:2}" ;;   # Log Producer (replay = ten cu)
   consume)  # xem N message dau cua topic: ./pipeline.sh consume raw-logs.linux 5
@@ -40,7 +44,7 @@ case "${1:-help}" in
   job1-reset) # xoa checkpoint de doc lai tu dau
             docker compose exec -T spark-master rm -rf /app/lake/checkpoints/job1 && echo "da xoa checkpoint job1" ;;
   train)    # train Isolation Forest tren window warm-up: ./pipeline.sh train --dataset Linux [--window 60 --key ALL]
-            docker compose exec -T -e PYTHONPATH=/app spark-master python3 /app/models/train_iforest.py "${@:2}" ;;
+            docker compose exec -T ml python3 /app/models/train_iforest.py "${@:2}" ;;
   job2)     docker compose exec -d spark-master bash -c "cd /app && /opt/spark/bin/spark-submit \
               --master spark://spark-master:7077 --total-executor-cores 2 --executor-memory 900m \
               --conf spark.driver.host=spark-master --conf spark.executorEnv.PYTHONPATH=/app \
@@ -54,7 +58,7 @@ case "${1:-help}" in
   quality)  # ho so chat luong du lieu: ./pipeline.sh quality --dataset Linux
             .venv/bin/python profiling/quality.py "${@:2}" ;;
   eval-detect) # danh gia phat hien bang dong chen: ./pipeline.sh eval-detect --dataset Linux
-            docker compose exec -T -e PYTHONPATH=/app spark-master python3 /app/eval/detection_metrics.py "${@:2}" ;;
+            docker compose exec -T ml python3 /app/eval/detection_metrics.py "${@:2}" ;;
   eval-novelty) # ti le dong unknown theo do dai warm-up: ./pipeline.sh eval-novelty --dataset Linux
             docker compose exec -T -e PYTHONPATH=/app spark-master python3 /app/eval/novelty_curve.py "${@:2}" ;;
   alerts)   # Alert System: doc topic alerts, khu lap, in ra man hinh / ghi tep / webhook

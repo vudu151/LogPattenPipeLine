@@ -1,0 +1,73 @@
+# Package log_producer (bước EXTRACT): hàng đợi Kafka mà Log Producer đẩy log thô lên.
+# Log Producer (producer.py) chạy trên máy host: ./pipeline.sh produce ...
+# Chạy riêng package này:  docker network create log_network ; docker compose up -d
+
+name: log-pattern-pipeline
+
+services:
+  kafka:
+    image: ${KAFKA_IMAGE}
+    container_name: kafka
+    ports:
+      - "${KAFKA_HOST_PORT}:29092"          # listener cho tiến trình trên máy host (Log Producer chạy ngoài docker)
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092,CONTROLLER://kafka:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:${KAFKA_HOST_PORT}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"   # topic phải được tạo tường minh bởi kafka-init
+      KAFKA_LOG_RETENTION_HOURS: ${KAFKA_LOG_RETENTION_HOURS}
+      KAFKA_NUM_PARTITIONS: ${KAFKA_NUM_PARTITIONS}
+      CLUSTER_ID: log-pattern-pipeline-0001
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks: [log_network]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  # Chạy một lần: tạo topic rồi thoát.
+  kafka-init:
+    image: ${KAFKA_IMAGE}
+    container_name: kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/init/create-topics.sh"]
+    volumes:
+      - ./create-topics.sh:/init/create-topics.sh:ro
+    networks: [log_network]
+    restart: "no"
+
+  # Giao diện web xem topic, message, consumer group của Kafka.
+  kafka-ui:
+    image: kafbat/kafka-ui:v1.1.0
+    container_name: kafka-ui
+    ports:
+      - "${KAFKA_UI_PORT}:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: log-pipeline
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "false"
+    networks: [log_network]
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+volumes:
+  kafka-data:
+
+networks:
+  log_network:
+    name: log_network
+    external: true        # mạng dùng chung của cả năm package; tạo bằng: docker network create log_network
