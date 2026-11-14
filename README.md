@@ -4,6 +4,13 @@ Pipeline xử lý log thời gian thực để **phát hiện mẫu log chưa bi
 
 Đồ án cuối kỳ học phần **IT5427 – Tích hợp và xử lý dữ liệu lớn**, Trường CNTT&TT, Đại học Bách khoa Hà Nội.
 
+## Tài liệu
+
+| Tệp | Nội dung |
+|---|---|
+| [`BaoCao/BaoCao_LogPatternPipeline.docx`](BaoCao/BaoCao_LogPatternPipeline.docx) | Báo cáo đồ án (17 trang) |
+| [`BaoCao/Slide_LogPatternPipeline.pdf`](BaoCao/Slide_LogPatternPipeline.pdf) | Slide trình bày (15 trang) |
+
 ## Ý tưởng
 
 Mỗi dòng log gồm phần cố định và phần tham số. Thay tham số bằng `<*>` thì được **mẫu log**:
